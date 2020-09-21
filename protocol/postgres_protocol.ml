@@ -31,6 +31,24 @@ let write_cstr f s =
   Faraday.write_uint8 f 0
 
 module Types = struct
+  module Statement_or_portal = struct
+    type t =
+      | Statement
+      | Portal
+
+    let to_char = function
+      | Statement -> 'S'
+      | Portal -> 'P'
+
+    let of_char = function
+      | 'S' -> Statement
+      | 'P' -> Portal
+      | c ->
+        raise
+        @@ Invalid_argument
+             (Printf.sprintf "Expected Statement('S') or Portal('P') but received '%c'" c)
+  end
+
   module Positive_int32 = struct
     type t = Int32.t
 
@@ -242,6 +260,51 @@ module Frontend = struct
       in
       Faraday.BE.write_uint32 f count
   end
+
+  module Close = struct
+    let ident = Some 'C'
+
+    type t =
+      { kind : Statement_or_portal.t
+      ; name : Optional_string.t
+      }
+
+    let size { name; _ } = 1 + Optional_string.length name + 1
+
+    let write f { kind; name } =
+      Faraday.write_char f (Statement_or_portal.to_char kind);
+      write_cstr f (Optional_string.to_string name)
+  end
+
+  module Describe = struct
+    let ident = Some 'D'
+
+    type t =
+      { kind : Statement_or_portal.t
+      ; name : Optional_string.t
+      }
+
+    let size { name; _ } = 1 + Optional_string.length name + 1
+
+    let write f { kind; name } =
+      Faraday.write_char f (Statement_or_portal.to_char kind);
+      write_cstr f (Optional_string.to_string name)
+  end
+
+  module Copy_fail = struct
+    let ident = Some 'f'
+
+    type t = string
+
+    let of_string t = t
+    let size t = String.length t + 1
+    let write f t = write_cstr f t
+  end
+
+  let flush = 'H'
+  let sync = 'S'
+  let terminate = 'X'
+  let copy_done = 'c'
 end
 
 module Writer = struct
@@ -263,9 +326,20 @@ module Writer = struct
     Faraday.BE.write_uint32 t.writer (Int32.of_int @@ (M.size msg + header_length));
     M.write t.writer msg
 
+  let write_ident_only ident t =
+    Faraday.write_char t.writer ident;
+    Faraday.BE.write_uint32 t.writer 4l
+
   let startup t msg = write (module Frontend.Startup_message) msg t
   let password t msg = write (module Frontend.Password_message) msg t
   let parse t msg = write (module Frontend.Parse) msg t
   let bind t msg = write (module Frontend.Bind) msg t
   let execute t msg = write (module Frontend.Execute) msg t
+  let close t msg = write (module Frontend.Close) msg t
+  let describe t msg = write (module Frontend.Describe) msg t
+  let copy_fail t msg = write (module Frontend.Copy_fail) msg t
+  let flush t = write_ident_only Frontend.flush t
+  let sync t = write_ident_only Frontend.sync t
+  let terminate t = write_ident_only Frontend.terminate t
+  let copy_done t = write_ident_only Frontend.copy_done t
 end
