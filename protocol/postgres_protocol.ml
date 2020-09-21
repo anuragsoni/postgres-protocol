@@ -26,8 +26,6 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
-let compose f g x = f (g x)
-
 let write_cstr f s =
   Faraday.write_string f s;
   Faraday.write_uint8 f 0
@@ -49,6 +47,22 @@ module Types = struct
     let of_int32 = Fun.id
     let of_int_exn = Int32.of_int
     let to_int32 = Fun.id
+  end
+
+  module Format_code = struct
+    type t =
+      [ `Text
+      | `Binary
+      ]
+
+    let of_int = function
+      | 0 -> Some `Text
+      | 1 -> Some `Binary
+      | _ -> None
+
+    let to_int = function
+      | `Text -> 0
+      | `Binary -> 1
   end
 end
 
@@ -132,10 +146,67 @@ module Frontend = struct
       + (Array.length oids * 4)
 
     let write f { name; statement; oids } =
-      write_cstr f name;
+      write_cstr f (Optional_string.to_string name);
       write_cstr f statement;
       Faraday.BE.write_uint16 f (Array.length oids);
       Array.iter (fun oid -> Faraday.BE.write_uint32 f (Oid.to_int32 oid)) oids
+  end
+
+  module Bind = struct
+    let ident = Some 'B'
+
+    type parameter =
+      { format_code : Format_code.t
+      ; parameter : string option
+      }
+
+    type t =
+      { destination : Optional_string.t
+      ; statement : Optional_string.t
+      ; parameters : parameter Array.t
+      ; result_formats : Format_code.t Array.t
+      }
+
+    let size { destination; statement; parameters; result_formats } =
+      let param_len = Array.length parameters in
+      Optional_string.length destination
+      + 1
+      + Optional_string.length statement
+      + 1
+      + 2
+      + (param_len * 2)
+      + 2
+      + Array.fold_left
+          (fun acc { parameter; _ } ->
+            acc + 4 + String.length (Option.value parameter ~default:""))
+          0
+          parameters
+      + 2
+      + (Array.length result_formats * 2)
+
+    let write f { destination; statement; parameters; result_formats } =
+      write_cstr f (Optional_string.to_string destination);
+      write_cstr f (Optional_string.to_string statement);
+      Faraday.BE.write_uint16 f (Array.length parameters);
+      Array.iter
+        (fun { format_code; _ } ->
+          Faraday.BE.write_uint16 f (Format_code.to_int format_code))
+        parameters;
+      Faraday.BE.write_uint16 f (Array.length parameters);
+      Array.iter
+        (fun { parameter; _ } ->
+          let len =
+            match parameter with
+            | None -> -1
+            | Some v -> String.length v
+          in
+          Faraday.BE.write_uint32 f (Int32.of_int len);
+          Option.iter (Faraday.write_string f) parameter)
+        parameters;
+      Faraday.BE.write_uint16 f (Array.length result_formats);
+      Array.iter
+        (fun fmt -> Faraday.BE.write_uint16 f (Format_code.to_int fmt))
+        result_formats
   end
 end
 
@@ -161,4 +232,5 @@ module Writer = struct
   let startup t msg = write (module Frontend.Startup_message) msg t
   let password t msg = write (module Frontend.Password_message) msg t
   let parse t msg = write (module Frontend.Parse) msg t
+  let bind t msg = write (module Frontend.Bind) msg t
 end
