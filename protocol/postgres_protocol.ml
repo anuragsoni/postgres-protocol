@@ -31,6 +31,20 @@ let write_cstr f s =
   Faraday.write_uint8 f 0
 
 module Types = struct
+  module Positive_int32 = struct
+    type t = Int32.t
+
+    let of_int t =
+      if t > 0l
+      then t
+      else
+        raise
+        @@ Invalid_argument
+             (Printf.sprintf "Expected positive integer, but received %ld instead" t)
+
+    let to_int32 t = t
+  end
+
   module Optional_string = struct
     type t = string
 
@@ -208,6 +222,26 @@ module Frontend = struct
         (fun fmt -> Faraday.BE.write_uint16 f (Format_code.to_int fmt))
         result_formats
   end
+
+  module Execute = struct
+    let ident = Some 'E'
+
+    type t =
+      { name : Optional_string.t
+      ; max_rows : [ `Unlimited | `Count of Positive_int32.t ]
+      }
+
+    let size { name; _ } = Optional_string.length name + 1 + 4
+
+    let write f { name; max_rows } =
+      write_cstr f name;
+      let count =
+        match max_rows with
+        | `Unlimited -> 0l
+        | `Count p -> Positive_int32.to_int32 p
+      in
+      Faraday.BE.write_uint32 f count
+  end
 end
 
 module Writer = struct
@@ -233,4 +267,5 @@ module Writer = struct
   let password t msg = write (module Frontend.Password_message) msg t
   let parse t msg = write (module Frontend.Parse) msg t
   let bind t msg = write (module Frontend.Bind) msg t
+  let execute t msg = write (module Frontend.Execute) msg t
 end
