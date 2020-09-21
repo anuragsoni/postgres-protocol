@@ -343,3 +343,69 @@ module Writer = struct
   let terminate t = write_ident_only Frontend.terminate t
   let copy_done t = write_ident_only Frontend.copy_done t
 end
+
+module Backend = struct
+  open Angstrom
+
+  type message_kind =
+    | Auth
+    | Unknown of char
+
+  let message_kind_of_char = function
+    | 'R' -> Auth
+    | c -> Unknown c
+
+  module Header = struct
+    type t =
+      { length : int
+      ; kind : message_kind
+      }
+
+    let parse =
+      let parse_len =
+        BE.any_int32
+        >>= fun l ->
+        let l = Int32.to_int l in
+        if l < 4 then fail (Printf.sprintf "Invalid payload length: %d" l) else return l
+      in
+      let parse_kind = lift (fun c -> message_kind_of_char c) any_char in
+      lift2 (fun kind length -> { kind; length }) parse_kind parse_len
+      <* commit
+      <?> "MESSAGE_HEADER"
+  end
+
+  module Auth = struct
+    type t =
+      | Ok
+      | KerberosV5
+      | CleartextPassword
+      | Md5Password of string
+      | SCMCredential
+      | GSS
+      | SSPI
+      | GSSContinue of string
+      | SASL of string
+      | SASLContinue of string
+      | SASLFinal of string
+
+    let parse { Header.length = len; _ } =
+      let p =
+        BE.any_int32
+        >>= function
+        | 0l -> return Ok <?> "AUTH_OK"
+        | 2l -> return KerberosV5 <?> "AUTH_KERBEROSV5"
+        | 3l -> return CleartextPassword <?> "AUTH_CLEARTEXT"
+        | 5l -> lift (fun salt -> Md5Password salt) (take 4) <?> "AUTH_MD5"
+        | 6l -> return SCMCredential <?> "AUTH_SCM_CREDENTIAL"
+        | 7l -> return GSS <?> "AUTH_GSS"
+        | 9l -> return SSPI <?> "AUTH_SSPI"
+        | 8l -> lift (fun s -> GSSContinue s) (take (len - 4 - 4)) <?> "AUTH_GSS_CONTINUE"
+        | 10l -> lift (fun s -> SASL s) (take (len - 4 - 4)) <?> "AUTH_SASL"
+        | 11l ->
+          lift (fun s -> SASLContinue s) (take (len - 4 - 4)) <?> "AUTH_SASL_CONTINUE"
+        | 12l -> lift (fun s -> SASLFinal s) (take (len - 4 - 4)) <?> "AUTH_SASL_FINAL"
+        | k -> fail (Printf.sprintf "Unknown authentication type: %ld" k)
+      in
+      p <?> "PARSE_AUTH"
+  end
+end
