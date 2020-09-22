@@ -30,7 +30,24 @@ let write_cstr f s =
   Faraday.write_string f s;
   Faraday.write_uint8 f 0
 
+let parse_cstr = Angstrom.(take_while (fun c -> c <> '\x00') <* char '\x00')
+
 module Types = struct
+  module Process_id = struct
+    type t = Int32.t
+
+    let to_int32 t = t
+    let of_int32 t = if t < 1l then None else Some t
+
+    let of_int32_exn t =
+      match of_int32 t with
+      | None ->
+        raise
+        @@ Invalid_argument
+             (Printf.sprintf "Process id needs to be a positive integer. Received: %ld" t)
+      | Some v -> v
+  end
+
   module Statement_or_portal = struct
     type t =
       | Statement
@@ -349,11 +366,21 @@ module Backend = struct
 
   type message_kind =
     | Auth
-    | Unknown of char
+    | BackendKeyData
+    | ErrorResponse
+    | NoticeResponse
+    | ParameterStatus
+    | ReadyForQuery
+    | UnknownMessage of char
 
   let message_kind_of_char = function
     | 'R' -> Auth
-    | c -> Unknown c
+    | 'K' -> BackendKeyData
+    | 'N' -> NoticeResponse
+    | 'E' -> ErrorResponse
+    | 'S' -> ParameterStatus
+    | 'Z' -> ReadyForQuery
+    | c -> UnknownMessage c
 
   module Header = struct
     type t =
@@ -407,5 +434,129 @@ module Backend = struct
         | k -> fail (Printf.sprintf "Unknown authentication type: %ld" k)
       in
       p <?> "PARSE_AUTH"
+  end
+
+  module Backend_key_data = struct
+    type t =
+      { pid : Process_id.t
+      ; secret : Int32.t
+      }
+
+    let parse _header =
+      let parse_pid =
+        BE.any_int32
+        >>= (fun pid ->
+              match Process_id.of_int32 pid with
+              | None -> fail @@ Printf.sprintf "Invalid process id: %ld" pid
+              | Some v -> return v)
+        <?> "PROCESS_ID"
+      in
+      lift2 (fun pid secret -> { pid; secret }) parse_pid BE.any_int32
+      <?> "BACKEND_KEY_DATA"
+  end
+
+  module Error_or_notice_kind = struct
+    type t =
+      | Severity
+      | Non_localized_severity
+      | Code
+      | Message
+      | Detail
+      | Hint
+      | Position
+      | Internal_position
+      | Internal_query
+      | Where
+      | Schema_name
+      | Table_name
+      | Column_name
+      | Datatype_name
+      | Constraint_name
+      | File
+      | Line
+      | Routine
+      | Unknown of char
+
+    let parse =
+      any_char
+      >>= fun c ->
+      let t =
+        match c with
+        | 'S' -> Severity
+        | 'V' -> Non_localized_severity
+        | 'C' -> Code
+        | 'M' -> Message
+        | 'D' -> Detail
+        | 'H' -> Hint
+        | 'P' -> Position
+        | 'p' -> Internal_position
+        | 'q' -> Internal_query
+        | 'W' -> Where
+        | 's' -> Schema_name
+        | 't' -> Table_name
+        | 'c' -> Column_name
+        | 'd' -> Datatype_name
+        | 'n' -> Constraint_name
+        | 'F' -> File
+        | 'L' -> Line
+        | 'R' -> Routine
+        | c -> Unknown c
+      in
+      return t
+  end
+
+  module Make_error_notice (K : sig
+    val label : string
+  end) =
+  struct
+    type t =
+      { code : Error_or_notice_kind.t
+      ; message : Optional_string.t
+      }
+
+    let parse_message =
+      lift Optional_string.of_string parse_cstr <?> Printf.sprintf "%s_MESSAGE" K.label
+
+    let parse _header =
+      lift2
+        (fun code message -> { code; message })
+        Error_or_notice_kind.parse
+        parse_message
+      <?> K.label
+  end
+
+  module Error_response = Make_error_notice (struct
+    let label = "ERROR_RESPONSE"
+  end)
+
+  module Notice_response = Make_error_notice (struct
+    let label = "NOTICE_RESPONSE"
+  end)
+
+  module Parameter_status = struct
+    type t =
+      { name : string
+      ; value : string
+      }
+
+    let parse _header =
+      lift2 (fun name value -> { name; value }) parse_cstr parse_cstr
+      <?> "PARAMETER_STATUS"
+  end
+
+  module Ready_for_query = struct
+    type t =
+      | Idle
+      | Transaction_block
+      | Failed_transaction
+
+    let parse _header =
+      any_char
+      >>= (function
+            | 'I' -> return Idle
+            | 'T' -> return Transaction_block
+            | 'E' -> return Failed_transaction
+            | c -> fail @@ Printf.sprintf "Unknown response for ReadyForQuery: %C" c)
+      <?> "READY_FOR_QUERY"
   end
 end
