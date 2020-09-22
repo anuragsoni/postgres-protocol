@@ -324,7 +324,7 @@ module Frontend = struct
   let copy_done = 'c'
 end
 
-module Writer = struct
+module Serializer = struct
   type t = { writer : Faraday.t }
 
   let create () = { writer = Faraday.create 0x1000 }
@@ -359,6 +359,7 @@ module Writer = struct
   let sync t = write_ident_only Frontend.sync t
   let terminate t = write_ident_only Frontend.terminate t
   let copy_done t = write_ident_only Frontend.copy_done t
+  let next_operation t = Faraday.operation t.writer
 end
 
 module Backend = struct
@@ -397,7 +398,6 @@ module Backend = struct
       in
       let parse_kind = lift (fun c -> message_kind_of_char c) any_char in
       lift2 (fun kind length -> { kind; length }) parse_kind parse_len
-      <* commit
       <?> "MESSAGE_HEADER"
   end
 
@@ -559,4 +559,66 @@ module Backend = struct
             | c -> fail @@ Printf.sprintf "Unknown response for ReadyForQuery: %C" c)
       <?> "READY_FOR_QUERY"
   end
+end
+
+module Parser = struct
+  module Wq = Ke.Rke.Weighted
+  module U = Angstrom.Unbuffered
+
+  (* the message handlers can use this to indicate when the parser should return `Close.
+     Ex: when in the auth stage, we will continue to try parsing messages till we received
+     a [ReadyForQuery] message from the postgres server. *)
+  type parser_output =
+    [ `Continue
+    | `Stop
+    ]
+
+  type t =
+    { queue : (char, Bigarray.int8_unsigned_elt) Wq.t
+    ; buffer : Bigstringaf.t
+    ; mutable parse_state : parser_output U.state
+    ; parser : parser_output Angstrom.t
+    ; mutable more : U.more
+    }
+
+  let create parser buffer =
+    { queue = Wq.from buffer
+    ; buffer
+    ; parser
+    ; parse_state = U.parse parser
+    ; more = U.Incomplete
+    }
+
+  let shift_and_compress t n =
+    Wq.N.shift_exn t.queue n;
+    Wq.compress t.queue
+
+  let next_operation t =
+    match t.parse_state with
+    | U.Partial { committed = 0; _ } -> `Read
+    | U.Partial { committed; continue } ->
+      shift_and_compress t committed;
+      t.parse_state <- continue t.buffer ~off:0 ~len:(Wq.length t.queue) t.more;
+      `Read
+    | U.Fail (committed, _, msg) ->
+      shift_and_compress t committed;
+      `Error msg
+    | U.Done (committed, `Continue) ->
+      shift_and_compress t committed;
+      t.parse_state <- U.parse t.parser;
+      `Read
+    | U.Done (committed, `Stop) ->
+      shift_and_compress t committed;
+      `Close
+
+  let blit src src_off dst dst_off len = Bigstringaf.blit src ~src_off dst ~dst_off ~len
+
+  let feed t ~buf ~off ~len =
+    if off < 0 || len < 0 || off + len > Bigstringaf.length buf
+    then raise (Invalid_argument "index out of bounds");
+    match Wq.N.push t.queue ~blit ~length:Bigstringaf.length ~off ~len buf with
+    | None -> Error `No_room_for_buffer
+    | Some _ ->
+      if len = 0 then t.more <- U.Complete;
+      Ok ()
 end

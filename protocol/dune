@@ -1,4 +1,4 @@
 (library
  (name postgres_protocol)
  (public_name postgres-protocol)
- (libraries angstrom faraday))
+ (libraries angstrom faraday ke))
