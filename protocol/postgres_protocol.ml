@@ -26,6 +26,10 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
+let src = Logs.Src.create "postgres.protocol"
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 let write_cstr f s =
   Faraday.write_string f s;
   Faraday.write_uint8 f 0
@@ -69,7 +73,7 @@ module Types = struct
   module Positive_int32 = struct
     type t = Int32.t
 
-    let of_int t =
+    let of_int32_exn t =
       if t > 0l
       then t
       else
@@ -156,7 +160,8 @@ module Frontend = struct
         (fun d ->
           write_cstr f "database";
           write_cstr f d)
-        database
+        database;
+      Faraday.write_uint8 f 0
 
     let size { user; database; _ } =
       let user_len = 4 + 1 + String.length user + 1 in
@@ -165,7 +170,7 @@ module Frontend = struct
         | None -> 0
         | Some d -> 8 + 1 + String.length d + 1
       in
-      4 + user_len + database_len
+      4 + user_len + database_len + 1
   end
 
   module Password_message = struct
@@ -325,9 +330,33 @@ module Frontend = struct
 end
 
 module Serializer = struct
-  type t = { writer : Faraday.t }
+  type t =
+    { writer : Faraday.t
+    ; mutable wakeup_writer : (unit -> unit) option
+    }
 
-  let create () = { writer = Faraday.create 0x1000 }
+  let create ?(size = 0x1000) () = { writer = Faraday.create size; wakeup_writer = None }
+
+  let yield_writer t thunk =
+    if Faraday.is_closed t.writer then failwith "Serializer is closed";
+    match t.wakeup_writer with
+    | None -> t.wakeup_writer <- Some thunk
+    | Some _ -> failwith "Only one write callback can be registered at a time"
+
+  let wakeup_writer t =
+    let thunk = t.wakeup_writer in
+    t.wakeup_writer <- None;
+    Option.iter (fun t -> t ()) thunk
+
+  let is_closed t = Faraday.is_closed t.writer
+  let drain t = Faraday.drain t.writer
+
+  let report_write_result t res =
+    match res with
+    | `Closed ->
+      Faraday.close t.writer;
+      ignore (drain t)
+    | `Ok n -> Faraday.shift t.writer n
 
   module type Message = sig
     type t
@@ -338,7 +367,7 @@ module Serializer = struct
   end
 
   let write (type a) (module M : Message with type t = a) msg t =
-    let header_length = if Option.is_none M.ident then 4 else 5 in
+    let header_length = 4 in
     Option.iter (fun c -> Faraday.write_char t.writer c) M.ident;
     Faraday.BE.write_uint32 t.writer (Int32.of_int @@ (M.size msg + header_length));
     M.write t.writer msg
@@ -559,6 +588,27 @@ module Backend = struct
             | c -> fail @@ Printf.sprintf "Unknown response for ReadyForQuery: %C" c)
       <?> "READY_FOR_QUERY"
   end
+
+  let parse =
+    Header.parse
+    <* commit
+    >>= fun ({ kind; length } as header) ->
+    let p =
+      match kind with
+      | Auth -> lift (fun m -> `Auth m) @@ Auth.parse header
+      | BackendKeyData -> lift (fun m -> `Backend_data m) @@ Backend_key_data.parse header
+      | ErrorResponse -> lift (fun m -> `Error_response m) @@ Error_response.parse header
+      | NoticeResponse ->
+        lift (fun m -> `Notice_response m) @@ Notice_response.parse header
+      | ParameterStatus ->
+        lift (fun m -> `Parameter_status m) @@ Parameter_status.parse header
+      | ReadyForQuery ->
+        lift (fun m -> `Ready_for_query m) @@ Ready_for_query.parse header
+      | UnknownMessage c ->
+        Log.warn (fun m -> m "Received an unknown message with ident: %C" c);
+        take (length - 4) *> (return @@ `Unknown_message c)
+    in
+    p <* commit
 end
 
 module Parser = struct
@@ -568,10 +618,7 @@ module Parser = struct
   (* the message handlers can use this to indicate when the parser should return `Close.
      Ex: when in the auth stage, we will continue to try parsing messages till we received
      a [ReadyForQuery] message from the postgres server. *)
-  type parser_output =
-    [ `Continue
-    | `Stop
-    ]
+  type parser_output = ([ `Read | `Yield | `Stop ], string) result
 
   type t =
     { queue : (char, Bigarray.int8_unsigned_elt) Wq.t
@@ -585,7 +632,7 @@ module Parser = struct
     { queue = Wq.from buffer
     ; buffer
     ; parser
-    ; parse_state = U.parse parser
+    ; parse_state = U.Done (0, Ok `Read)
     ; more = U.Incomplete
     }
 
@@ -593,23 +640,33 @@ module Parser = struct
     Wq.N.shift_exn t.queue n;
     Wq.compress t.queue
 
-  let next_operation t =
+  let parse t =
     match t.parse_state with
-    | U.Partial { committed = 0; _ } -> `Read
     | U.Partial { committed; continue } ->
       shift_and_compress t committed;
       t.parse_state <- continue t.buffer ~off:0 ~len:(Wq.length t.queue) t.more;
       `Read
     | U.Fail (committed, _, msg) ->
+      Log.err (fun m -> m "Parse error: %S" msg);
       shift_and_compress t committed;
       `Error msg
-    | U.Done (committed, `Continue) ->
+    | U.Done (committed, Ok `Read) ->
+      Log.debug (fun m -> m "Finished parsing message");
       shift_and_compress t committed;
       t.parse_state <- U.parse t.parser;
       `Read
-    | U.Done (committed, `Stop) ->
+    | U.Done (committed, Ok `Yield) ->
+      Log.debug (fun m -> m "Yielding reader");
       shift_and_compress t committed;
-      `Close
+      `Yield
+    | U.Done (committed, Ok `Stop) ->
+      Log.debug (fun m -> m "Yielding reader");
+      shift_and_compress t committed;
+      `Stop
+    | U.Done (committed, Error msg) ->
+      Log.debug (fun m -> m "Error: %S" msg);
+      shift_and_compress t committed;
+      `Error msg
 
   let blit src src_off dst dst_off len = Bigstringaf.blit src ~src_off dst ~dst_off ~len
 
@@ -621,4 +678,29 @@ module Parser = struct
     | Some _ ->
       if len = 0 then t.more <- U.Complete;
       Ok ()
+end
+
+module Reader = struct
+  type t =
+    { parser : Parser.t
+    ; mutable wakeup_reader : (unit -> unit) option
+    }
+
+  let create buffer handler =
+    let open Angstrom in
+    let p = Backend.parse >>= handler in
+    { parser = Parser.create p buffer; wakeup_reader = None }
+
+  let yield_reader t thunk =
+    match t.wakeup_reader with
+    | None -> t.wakeup_reader <- Some thunk
+    | Some _ -> failwith "only one callback can be registered at a time"
+
+  let wakeup_reader t =
+    let thunk = t.wakeup_reader in
+    t.wakeup_reader <- None;
+    Option.iter (fun t -> t ()) thunk
+
+  let parse t = Parser.parse t.parser
+  let feed t ~buf ~off ~len = Parser.feed t.parser ~buf ~off ~len
 end
