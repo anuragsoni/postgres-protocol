@@ -1,0 +1,3 @@
+(executable
+ (name test_driver)
+ (libraries gluten-lwt-unix postgres-protocol logs.fmt fmt.tty))
