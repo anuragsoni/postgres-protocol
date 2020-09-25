@@ -394,28 +394,10 @@ end
 module Backend = struct
   open Angstrom
 
-  type message_kind =
-    | Auth
-    | BackendKeyData
-    | ErrorResponse
-    | NoticeResponse
-    | ParameterStatus
-    | ReadyForQuery
-    | UnknownMessage of char
-
-  let message_kind_of_char = function
-    | 'R' -> Auth
-    | 'K' -> BackendKeyData
-    | 'N' -> NoticeResponse
-    | 'E' -> ErrorResponse
-    | 'S' -> ParameterStatus
-    | 'Z' -> ReadyForQuery
-    | c -> UnknownMessage c
-
   module Header = struct
     type t =
       { length : int
-      ; kind : message_kind
+      ; kind : char
       }
 
     let parse =
@@ -425,9 +407,7 @@ module Backend = struct
         let l = Int32.to_int l in
         if l < 4 then fail (Printf.sprintf "Invalid payload length: %d" l) else return l
       in
-      let parse_kind = lift (fun c -> message_kind_of_char c) any_char in
-      lift2 (fun kind length -> { kind; length }) parse_kind parse_len
-      <?> "MESSAGE_HEADER"
+      lift2 (fun kind length -> { kind; length }) any_char parse_len <?> "MESSAGE_HEADER"
   end
 
   module Auth = struct
@@ -589,118 +569,70 @@ module Backend = struct
       <?> "READY_FOR_QUERY"
   end
 
+  type message =
+    | Auth of Auth.t
+    | BackendKeyData of Backend_key_data.t
+    | ErrorResponse of Error_response.t
+    | NoticeResponse of Notice_response.t
+    | ParameterStatus of Parameter_status.t
+    | ReadyForQuery of Ready_for_query.t
+    | UnknownMessage of char
+
   let parse =
     Header.parse
     <* commit
     >>= fun ({ kind; length } as header) ->
-    let p =
-      match kind with
-      | Auth -> lift (fun m -> `Auth m) @@ Auth.parse header
-      | BackendKeyData -> lift (fun m -> `Backend_data m) @@ Backend_key_data.parse header
-      | ErrorResponse -> lift (fun m -> `Error_response m) @@ Error_response.parse header
-      | NoticeResponse ->
-        lift (fun m -> `Notice_response m) @@ Notice_response.parse header
-      | ParameterStatus ->
-        lift (fun m -> `Parameter_status m) @@ Parameter_status.parse header
-      | ReadyForQuery ->
-        lift (fun m -> `Ready_for_query m) @@ Ready_for_query.parse header
-      | UnknownMessage c ->
-        Log.warn (fun m -> m "Received an unknown message with ident: %C" c);
-        take (length - 4) *> (return @@ `Unknown_message c)
-    in
-    p <* commit
+    match kind with
+    | 'R' -> lift (fun m -> Auth m) @@ Auth.parse header
+    | 'K' -> lift (fun m -> BackendKeyData m) @@ Backend_key_data.parse header
+    | 'E' -> lift (fun m -> ErrorResponse m) @@ Error_response.parse header
+    | 'N' -> lift (fun m -> NoticeResponse m) @@ Notice_response.parse header
+    | 'S' -> lift (fun m -> ParameterStatus m) @@ Parameter_status.parse header
+    | 'Z' -> lift (fun m -> ReadyForQuery m) @@ Ready_for_query.parse header
+    | c ->
+      Log.warn (fun m -> m "Received an unknown message with ident: %C" c);
+      take (length - 4) *> (return @@ UnknownMessage c)
 end
 
 module Parser = struct
-  module Wq = Ke.Rke.Weighted
   module U = Angstrom.Unbuffered
 
-  (* the message handlers can use this to indicate when the parser should return `Close.
-     Ex: when in the auth stage, we will continue to try parsing messages till we received
-     a [ReadyForQuery] message from the postgres server. *)
-  type parser_output = ([ `Read | `Yield | `Stop ], string) result
-
   type t =
-    { queue : (char, Bigarray.int8_unsigned_elt) Wq.t
-    ; buffer : Bigstringaf.t
-    ; mutable parse_state : parser_output U.state
-    ; parser : parser_output Angstrom.t
-    ; mutable more : U.more
+    { mutable parse_state : unit U.state
+    ; parser : unit Angstrom.t
+    ; mutable closed : bool
     }
 
-  let create parser buffer =
-    { queue = Wq.from buffer
-    ; buffer
-    ; parser
-    ; parse_state = U.Done (0, Ok `Read)
-    ; more = U.Incomplete
-    }
+  let create handler =
+    let parser = Angstrom.(skip_many (Backend.parse <* commit >>| handler)) in
+    { parser; parse_state = U.Done (0, ()); closed = false }
 
-  let shift_and_compress t n =
-    Wq.N.shift_exn t.queue n;
-    Wq.compress t.queue
-
-  let parse t =
+  let next_action t =
     match t.parse_state with
-    | U.Partial { committed; continue } ->
-      shift_and_compress t committed;
-      t.parse_state <- continue t.buffer ~off:0 ~len:(Wq.length t.queue) t.more;
-      `Read
-    | U.Fail (committed, _, msg) ->
-      Log.err (fun m -> m "Parse error: %S" msg);
-      shift_and_compress t committed;
-      `Error msg
-    | U.Done (committed, Ok `Read) ->
-      Log.debug (fun m -> m "Finished parsing message");
-      shift_and_compress t committed;
-      t.parse_state <- U.parse t.parser;
-      `Read
-    | U.Done (committed, Ok `Yield) ->
-      Log.debug (fun m -> m "Yielding reader");
-      shift_and_compress t committed;
-      `Yield
-    | U.Done (committed, Ok `Stop) ->
-      Log.debug (fun m -> m "Yielding reader");
-      shift_and_compress t committed;
-      `Stop
-    | U.Done (committed, Error msg) ->
-      Log.debug (fun m -> m "Error: %S" msg);
-      shift_and_compress t committed;
-      `Error msg
+    | _ when t.closed -> `Close
+    | U.Done _ -> `Read
+    | Partial _ -> `Read
+    | Fail (_, _, msg) -> `Error msg
 
-  let blit src src_off dst dst_off len = Bigstringaf.blit src ~src_off dst ~dst_off ~len
+  let parse t ~buf ~off ~len more =
+    let rec aux t =
+      match t.parse_state with
+      | U.Partial { continue; _ } -> t.parse_state <- continue buf ~off ~len more
+      | U.Done (0, ()) ->
+        t.parse_state <- U.parse t.parser;
+        aux t
+      | U.Done _ -> t.parse_state <- U.Done (0, ())
+      | U.Fail _ -> ()
+    in
+    aux t;
+    match t.parse_state with
+    | U.Partial { committed; _ } | U.Done (committed, ()) | U.Fail (committed, _, _) ->
+      committed
 
-  let feed t ~buf ~off ~len =
-    if off < 0 || len < 0 || off + len > Bigstringaf.length buf
-    then raise (Invalid_argument "index out of bounds");
-    match Wq.N.push t.queue ~blit ~length:Bigstringaf.length ~off ~len buf with
-    | None -> Error `No_room_for_buffer
-    | Some _ ->
-      if len = 0 then t.more <- U.Complete;
-      Ok ()
-end
-
-module Reader = struct
-  type t =
-    { parser : Parser.t
-    ; mutable wakeup_reader : (unit -> unit) option
-    }
-
-  let create buffer handler =
-    let open Angstrom in
-    let p = Backend.parse >>= handler in
-    { parser = Parser.create p buffer; wakeup_reader = None }
-
-  let yield_reader t thunk =
-    match t.wakeup_reader with
-    | None -> t.wakeup_reader <- Some thunk
-    | Some _ -> failwith "only one callback can be registered at a time"
-
-  let wakeup_reader t =
-    let thunk = t.wakeup_reader in
-    t.wakeup_reader <- None;
-    Option.iter (fun t -> t ()) thunk
-
-  let parse t = Parser.parse t.parser
-  let feed t ~buf ~off ~len = Parser.feed t.parser ~buf ~off ~len
+  let feed t ~buf ~off ~len more =
+    let committed = parse t ~buf ~off ~len more in
+    (match more with
+    | U.Complete -> t.closed <- true
+    | Incomplete -> ());
+    committed
 end
