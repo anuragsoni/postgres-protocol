@@ -329,68 +329,6 @@ module Frontend = struct
   let copy_done = 'c'
 end
 
-module Serializer = struct
-  type t =
-    { writer : Faraday.t
-    ; mutable wakeup_writer : (unit -> unit) option
-    }
-
-  let create ?(size = 0x1000) () = { writer = Faraday.create size; wakeup_writer = None }
-
-  let yield_writer t thunk =
-    if Faraday.is_closed t.writer then failwith "Serializer is closed";
-    match t.wakeup_writer with
-    | None -> t.wakeup_writer <- Some thunk
-    | Some _ -> failwith "Only one write callback can be registered at a time"
-
-  let wakeup_writer t =
-    let thunk = t.wakeup_writer in
-    t.wakeup_writer <- None;
-    Option.iter (fun t -> t ()) thunk
-
-  let is_closed t = Faraday.is_closed t.writer
-  let drain t = Faraday.drain t.writer
-
-  let report_write_result t res =
-    match res with
-    | `Closed ->
-      Faraday.close t.writer;
-      ignore (drain t)
-    | `Ok n -> Faraday.shift t.writer n
-
-  module type Message = sig
-    type t
-
-    val ident : char option
-    val size : t -> int
-    val write : Faraday.t -> t -> unit
-  end
-
-  let write (type a) (module M : Message with type t = a) msg t =
-    let header_length = 4 in
-    Option.iter (fun c -> Faraday.write_char t.writer c) M.ident;
-    Faraday.BE.write_uint32 t.writer (Int32.of_int @@ (M.size msg + header_length));
-    M.write t.writer msg
-
-  let write_ident_only ident t =
-    Faraday.write_char t.writer ident;
-    Faraday.BE.write_uint32 t.writer 4l
-
-  let startup t msg = write (module Frontend.Startup_message) msg t
-  let password t msg = write (module Frontend.Password_message) msg t
-  let parse t msg = write (module Frontend.Parse) msg t
-  let bind t msg = write (module Frontend.Bind) msg t
-  let execute t msg = write (module Frontend.Execute) msg t
-  let close t msg = write (module Frontend.Close) msg t
-  let describe t msg = write (module Frontend.Describe) msg t
-  let copy_fail t msg = write (module Frontend.Copy_fail) msg t
-  let flush t = write_ident_only Frontend.flush t
-  let sync t = write_ident_only Frontend.sync t
-  let terminate t = write_ident_only Frontend.terminate t
-  let copy_done t = write_ident_only Frontend.copy_done t
-  let next_operation t = Faraday.operation t.writer
-end
-
 module Backend = struct
   open Angstrom
 
@@ -594,6 +532,68 @@ module Backend = struct
       take (length - 4) *> (return @@ UnknownMessage c)
 end
 
+module Serializer = struct
+  type t =
+    { writer : Faraday.t
+    ; mutable wakeup_writer : (unit -> unit) option
+    }
+
+  let create ?(size = 0x1000) () = { writer = Faraday.create size; wakeup_writer = None }
+
+  let yield_writer t thunk =
+    if Faraday.is_closed t.writer then failwith "Serializer is closed";
+    match t.wakeup_writer with
+    | None -> t.wakeup_writer <- Some thunk
+    | Some _ -> failwith "Only one write callback can be registered at a time"
+
+  let wakeup_writer t =
+    let thunk = t.wakeup_writer in
+    t.wakeup_writer <- None;
+    Option.iter (fun t -> t ()) thunk
+
+  let is_closed t = Faraday.is_closed t.writer
+  let drain t = Faraday.drain t.writer
+
+  let report_write_result t res =
+    match res with
+    | `Closed ->
+      Faraday.close t.writer;
+      ignore (drain t)
+    | `Ok n -> Faraday.shift t.writer n
+
+  module type Message = sig
+    type t
+
+    val ident : char option
+    val size : t -> int
+    val write : Faraday.t -> t -> unit
+  end
+
+  let write (type a) (module M : Message with type t = a) msg t =
+    let header_length = 4 in
+    Option.iter (fun c -> Faraday.write_char t.writer c) M.ident;
+    Faraday.BE.write_uint32 t.writer (Int32.of_int @@ (M.size msg + header_length));
+    M.write t.writer msg
+
+  let write_ident_only ident t =
+    Faraday.write_char t.writer ident;
+    Faraday.BE.write_uint32 t.writer 4l
+
+  let startup t msg = write (module Frontend.Startup_message) msg t
+  let password t msg = write (module Frontend.Password_message) msg t
+  let parse t msg = write (module Frontend.Parse) msg t
+  let bind t msg = write (module Frontend.Bind) msg t
+  let execute t msg = write (module Frontend.Execute) msg t
+  let close t msg = write (module Frontend.Close) msg t
+  let describe t msg = write (module Frontend.Describe) msg t
+  let copy_fail t msg = write (module Frontend.Copy_fail) msg t
+  let flush t = write_ident_only Frontend.flush t
+  let sync t = write_ident_only Frontend.sync t
+  let terminate t = write_ident_only Frontend.terminate t
+  let copy_done t = write_ident_only Frontend.copy_done t
+  let next_operation t = Faraday.operation t.writer
+end
+
 module Parser = struct
   module U = Angstrom.Unbuffered
 
@@ -635,4 +635,61 @@ module Parser = struct
     | U.Complete -> t.closed <- true
     | Incomplete -> ());
     committed
+end
+
+module Ctx = struct
+  type error =
+    [ `Postgres_error of Backend.Error_response.t
+    | `Parse_error of string
+    ]
+
+  type t =
+    { writer : Serializer.t
+    ; user : string
+    ; password : string
+    ; database : string option
+    ; mutable ready_for_query : bool
+    ; error_handler : error -> unit
+    }
+
+  let create ~user ?(password = "") ?database ?size error_handler () =
+    let writer = Serializer.create ?size () in
+    { writer; user; password; database; ready_for_query = false; error_handler }
+end
+
+module Connection = struct
+  let handle_auth_message ctx = function
+    | Backend.Auth.Ok -> ()
+    | Md5Password salt ->
+      let hash = Auth.Md5.hash ~username:ctx.Ctx.user ~password:ctx.password ~salt in
+      Serializer.password ctx.writer (Frontend.Password_message.Md5 hash);
+      Serializer.wakeup_writer ctx.writer
+    | KerberosV5
+    | CleartextPassword
+    | SCMCredential
+    | GSS
+    | SSPI
+    | GSSContinue _
+    | SASL _
+    | SASLContinue _
+    | SASLFinal _ -> failwith "Auth method not implemented yet"
+
+  let handle_message ctx msg =
+    match msg with
+    | Backend.Auth msg -> handle_auth_message ctx msg
+    | _ -> failwith "TODO: not implemented yet"
+
+  type t =
+    { reader : Parser.t
+    ; ctx : Ctx.t
+    }
+
+  let create ~user ?password ?database ?size error_handler () =
+    let ctx = Ctx.create ~user ?password ?database ?size error_handler () in
+    let startup_message = Frontend.Startup_message.make ~user ?database () in
+    Serializer.startup ctx.Ctx.writer startup_message;
+    { reader = Parser.create (handle_message ctx); ctx }
+
+  let next_write_operation t = Serializer.next_operation t.ctx.writer
+  let next_read_operation t = Parser.next_action t.reader
 end
