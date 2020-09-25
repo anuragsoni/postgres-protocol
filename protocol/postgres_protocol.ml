@@ -520,6 +520,7 @@ module Backend = struct
     Header.parse
     <* commit
     >>= fun ({ kind; length } as header) ->
+    Logs.info (fun m -> m "Message of kind %C" kind);
     match kind with
     | 'R' -> lift (fun m -> Auth m) @@ Auth.parse header
     | 'K' -> lift (fun m -> BackendKeyData m) @@ Backend_key_data.parse header
@@ -536,9 +537,11 @@ module Serializer = struct
   type t =
     { writer : Faraday.t
     ; mutable wakeup_writer : (unit -> unit) option
+    ; mutable drained_bytes : int
     }
 
-  let create ?(size = 0x1000) () = { writer = Faraday.create size; wakeup_writer = None }
+  let create ?(size = 0x1000) () =
+    { writer = Faraday.create size; wakeup_writer = None; drained_bytes = 0 }
 
   let yield_writer t thunk =
     if Faraday.is_closed t.writer then failwith "Serializer is closed";
@@ -554,11 +557,13 @@ module Serializer = struct
   let is_closed t = Faraday.is_closed t.writer
   let drain t = Faraday.drain t.writer
 
+  let close_and_drain t =
+    Faraday.close t.writer;
+    t.drained_bytes <- drain t
+
   let report_write_result t res =
     match res with
-    | `Closed ->
-      Faraday.close t.writer;
-      ignore (drain t)
+    | `Closed -> close_and_drain t
     | `Ok n -> Faraday.shift t.writer n
 
   module type Message = sig
@@ -591,7 +596,12 @@ module Serializer = struct
   let sync t = write_ident_only Frontend.sync t
   let terminate t = write_ident_only Frontend.terminate t
   let copy_done t = write_ident_only Frontend.copy_done t
-  let next_operation t = Faraday.operation t.writer
+
+  let next_operation t =
+    match Faraday.operation t.writer with
+    | `Close -> `Close t.drained_bytes
+    | `Yield -> `Yield
+    | `Writev iovecs -> `Write iovecs
 end
 
 module Parser = struct
@@ -612,7 +622,7 @@ module Parser = struct
     | _ when t.closed -> `Close
     | U.Done _ -> `Read
     | Partial _ -> `Read
-    | Fail (_, _, msg) -> `Error msg
+    | Fail (_, _, _msg) -> `Close
 
   let parse t ~buf ~off ~len more =
     let rec aux t =
@@ -635,12 +645,16 @@ module Parser = struct
     | U.Complete -> t.closed <- true
     | Incomplete -> ());
     committed
+
+  let is_closed t = t.closed
+  let force_close t = t.closed <- true
 end
 
 module Ctx = struct
   type error =
     [ `Postgres_error of Backend.Error_response.t
     | `Parse_error of string
+    | `Exn of exn
     ]
 
   type t =
@@ -650,17 +664,26 @@ module Ctx = struct
     ; database : string option
     ; mutable ready_for_query : bool
     ; error_handler : error -> unit
+    ; auth_handler : unit -> unit
     }
 
-  let create ~user ?(password = "") ?database ?size error_handler () =
+  let create ~user ?(password = "") ?database ?size error_handler auth_handler () =
     let writer = Serializer.create ?size () in
-    { writer; user; password; database; ready_for_query = false; error_handler }
+    { writer
+    ; user
+    ; password
+    ; database
+    ; ready_for_query = false
+    ; error_handler
+    ; auth_handler
+    }
 end
 
 module Connection = struct
   let handle_auth_message ctx = function
     | Backend.Auth.Ok -> ()
     | Md5Password salt ->
+      Logs.info (fun m -> m "auth message");
       let hash = Auth.Md5.hash ~username:ctx.Ctx.user ~password:ctx.password ~salt in
       Serializer.password ctx.writer (Frontend.Password_message.Md5 hash);
       Serializer.wakeup_writer ctx.writer
@@ -677,19 +700,39 @@ module Connection = struct
   let handle_message ctx msg =
     match msg with
     | Backend.Auth msg -> handle_auth_message ctx msg
-    | _ -> failwith "TODO: not implemented yet"
+    | ReadyForQuery _ ->
+      Logs.info (fun m -> m "Ready for query now");
+      ctx.auth_handler ()
+    | _ -> ()
 
   type t =
     { reader : Parser.t
     ; ctx : Ctx.t
     }
 
-  let create ~user ?password ?database ?size error_handler () =
-    let ctx = Ctx.create ~user ?password ?database ?size error_handler () in
+  let create ~user ?password ?database ?size auth_handler error_handler () =
+    let ctx = Ctx.create ~user ?password ?database ?size error_handler auth_handler () in
     let startup_message = Frontend.Startup_message.make ~user ?database () in
     Serializer.startup ctx.Ctx.writer startup_message;
     { reader = Parser.create (handle_message ctx); ctx }
 
   let next_write_operation t = Serializer.next_operation t.ctx.writer
   let next_read_operation t = Parser.next_action t.reader
+
+  let read t buf ~off ~len =
+    Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Incomplete
+
+  let read_eof t buf ~off ~len =
+    Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Complete
+
+  let yield_reader _t _thunk = ()
+  let report_write_result t res = Serializer.report_write_result t.ctx.writer res
+  let report_exn _t _exn = ()
+  let is_closed t = Parser.is_closed t.reader && Serializer.is_closed t.ctx.writer
+
+  let shutdown t =
+    Parser.force_close t.reader;
+    Serializer.close_and_drain t.ctx.writer
+
+  let yield_writer t thunk = Serializer.yield_writer t.ctx.writer thunk
 end
