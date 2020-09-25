@@ -25,5 +25,6 @@
    (>= 0.14.1))
   (faraday
    (>= 0.7.2))
+  logs
   (alcotest :with-test)
   (qcheck-alcotest :with-test)))
