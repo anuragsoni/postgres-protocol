@@ -91,12 +91,22 @@ module Frontend : sig
       ; parameter : string option
       }
 
+    val make_param : Types.Format_code.t -> ?parameter:string -> unit -> parameter
+
     type t =
       { destination : Types.Optional_string.t
       ; statement : Types.Optional_string.t
       ; parameters : parameter Array.t
       ; result_formats : Types.Format_code.t Array.t
       }
+
+    val make
+      :  ?destination:string
+      -> ?statement:string
+      -> ?parameters:parameter array
+      -> ?result_formats:Types.Format_code.t array
+      -> unit
+      -> t
   end
 
   module Execute : sig
@@ -104,6 +114,12 @@ module Frontend : sig
       { name : Types.Optional_string.t
       ; max_rows : [ `Count of Types.Positive_int32.t | `Unlimited ]
       }
+
+    val make
+      :  ?name:string
+      -> [ `Count of Types.Positive_int32.t | `Unlimited ]
+      -> unit
+      -> t
   end
 
   module Close : sig
@@ -217,6 +233,7 @@ module Backend : sig
     | ReadyForQuery of Ready_for_query.t
     | ParseComplete
     | BindComplete
+    | DataRow of string option list
     | UnknownMessage of char
 
   val parse : message Angstrom.t
@@ -296,6 +313,15 @@ module Connection : sig
     -> ?oids:Types.Oid.t array
     -> finish:(unit -> unit)
     -> unit
+    -> unit
+
+  val execute
+    :  t
+    -> ?name:string
+    -> ?statement:string
+    -> ?parameters:Frontend.Bind.parameter array
+    -> (string option list -> unit)
+    -> (unit -> unit)
     -> unit
 
   val next_write_operation

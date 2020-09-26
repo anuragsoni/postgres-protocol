@@ -214,11 +214,26 @@ module Frontend = struct
       ; parameter : string option
       }
 
+    let make_param format_code ?parameter () = { format_code; parameter }
+
     type t =
       { destination : Optional_string.t
       ; statement : Optional_string.t
       ; parameters : parameter Array.t
       ; result_formats : Format_code.t Array.t
+      }
+
+    let make
+        ?(destination = "")
+        ?(statement = "")
+        ?(parameters = Array.of_list [])
+        ?(result_formats = Array.of_list [])
+        ()
+      =
+      { destination = Optional_string.of_string destination
+      ; statement = Optional_string.of_string statement
+      ; parameters
+      ; result_formats
       }
 
     let size { destination; statement; parameters; result_formats } =
@@ -270,6 +285,9 @@ module Frontend = struct
       { name : Optional_string.t
       ; max_rows : [ `Unlimited | `Count of Positive_int32.t ]
       }
+
+    let make ?(name = "") max_rows () =
+      { name = Optional_string.of_string name; max_rows }
 
     let size { name; _ } = Optional_string.length name + 1 + 4
 
@@ -507,6 +525,17 @@ module Backend = struct
       <?> "READY_FOR_QUERY"
   end
 
+  module Data_row = struct
+    let parse _header =
+      BE.any_int16
+      >>= fun len ->
+      count
+        len
+        (BE.any_int32
+        >>= fun l ->
+        if l = -1l then return None else lift Option.some @@ take (Int32.to_int l))
+  end
+
   type message =
     | Auth of Auth.t
     | BackendKeyData of Backend_key_data.t
@@ -516,6 +545,7 @@ module Backend = struct
     | ReadyForQuery of Ready_for_query.t
     | ParseComplete
     | BindComplete
+    | DataRow of string option list
     | UnknownMessage of char
 
   let parse =
@@ -532,6 +562,7 @@ module Backend = struct
     | 'Z' -> lift (fun m -> ReadyForQuery m) @@ Ready_for_query.parse header
     | '1' -> return ParseComplete
     | '2' -> return BindComplete
+    | 'D' -> lift (fun m -> DataRow m) @@ Data_row.parse header
     | c ->
       Log.warn (fun m -> m "Received an unknown message with ident: %C" c);
       take (length - 4) *> (return @@ UnknownMessage c)
@@ -665,13 +696,10 @@ module Connection = struct
 
   type error_handler = error -> unit
 
-  type state =
+  type mode =
     | Connect
-    | Ready_for_query
     | Parse
-
-  (* | Bind *)
-  (* | Execute *)
+    | Execute
 
   type t =
     { user : string
@@ -681,95 +709,10 @@ module Connection = struct
     ; error_handler : error_handler
     ; reader : Parser.t
     ; writer : Serializer.t
-    ; mutable state : state
+    ; mutable state : mode
     ; mutable ready_for_query : unit -> unit
+    ; mutable on_data_row : string option list -> unit
     }
-
-  let handle_auth_message t msg =
-    let r msg = raise @@ Auth_method_not_implemented msg in
-    match msg with
-    | Backend.Auth.Ok -> ()
-    | Md5Password salt ->
-      let hash = Auth.Md5.hash ~username:t.user ~password:t.password ~salt in
-      let password_message = Frontend.Password_message.Md5 hash in
-      Serializer.password t.writer password_message;
-      Serializer.wakeup_writer t.writer
-    | KerberosV5 -> r "kerberos"
-    | CleartextPassword -> r "clear text password"
-    | SCMCredential -> r "SCMCredential"
-    | GSS -> r "GSS"
-    | SSPI -> r "SSPI"
-    | GSSContinue _ -> r "GSSContinue"
-    | SASL _ -> r "SASL"
-    | SASLContinue _ -> r "SASLContinue"
-    | SASLFinal _ -> r "SASLFinal"
-
-  let handle_connect t msg =
-    match msg with
-    | Backend.Auth msg -> handle_auth_message t msg
-    | ReadyForQuery _ ->
-      Log.debug (fun m -> m "Ready for query");
-      t.state <- Ready_for_query;
-      t.ready_for_query ()
-    | ParameterStatus s ->
-      Log.debug (fun m ->
-          m "ParameterStatus: (%S, %S)" s.Backend.Parameter_status.name s.value)
-    | NoticeResponse msg ->
-      Log.warn (fun m -> m "PostgresWarning: %S" msg.Backend.Notice_response.message)
-    | _ ->
-      (* Ignore other messages during startup *)
-      ()
-
-  let handle_parse t msg =
-    match msg with
-    | Backend.ParseComplete -> ()
-    | ReadyForQuery _ -> t.ready_for_query ()
-    | _ -> ()
-
-  let handle_message' t msg =
-    match msg with
-    | Backend.ErrorResponse e ->
-      Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
-      t.error_handler (`Postgres_error e)
-    | _ ->
-      (match t.state with
-      | Connect -> handle_connect t msg
-      | Parse -> handle_parse t msg
-      | _ -> failwith "Not implemented yet")
-
-  let connect ~user ?(password = "") ?database ~error_handler ~finish () =
-    let rec handle_message msg =
-      let t = Lazy.force t in
-      handle_message' t msg
-    and t =
-      lazy
-        { user
-        ; password
-        ; database
-        ; error_handler
-        ; backend_key_data = None
-        ; reader = Parser.create handle_message
-        ; writer = Serializer.create ()
-        ; state = Connect
-        ; ready_for_query = finish
-        }
-    in
-    let t = Lazy.force t in
-    let startup_message = Frontend.Startup_message.make ~user ?database () in
-    Serializer.startup t.writer startup_message;
-    Serializer.wakeup_writer t.writer;
-    t
-
-  let prepare conn ~statement ~name ?(oids = Array.of_list []) ~finish () =
-    match conn.state with
-    | Ready_for_query ->
-      let prepare = { Frontend.Parse.name; statement; oids } in
-      Serializer.parse conn.writer prepare;
-      Serializer.sync conn.writer;
-      Serializer.wakeup_writer conn.writer;
-      conn.ready_for_query <- finish;
-      conn.state <- Parse
-    | _ -> failwith "Can't call prepare"
 
   let next_write_operation t = Serializer.next_operation t.writer
   let next_read_operation t = Parser.next_action t.reader
@@ -793,4 +736,110 @@ module Connection = struct
   let report_exn t exn =
     shutdown t;
     t.error_handler (`Exn exn)
+
+  let handle_auth_message t msg =
+    let r msg = raise @@ Auth_method_not_implemented msg in
+    match msg with
+    | Backend.Auth.Ok -> ()
+    | Md5Password salt ->
+      let hash = Auth.Md5.hash ~username:t.user ~password:t.password ~salt in
+      let password_message = Frontend.Password_message.Md5 hash in
+      Serializer.password t.writer password_message;
+      Serializer.wakeup_writer t.writer
+    | KerberosV5 -> r "kerberos"
+    | CleartextPassword -> r "clear text password"
+    | SCMCredential -> r "SCMCredential"
+    | GSS -> r "GSS"
+    | SSPI -> r "SSPI"
+    | GSSContinue _ -> r "GSSContinue"
+    | SASL _ -> r "SASL"
+    | SASLContinue _ -> r "SASLContinue"
+    | SASLFinal _ -> r "SASLFinal"
+
+  let handle_connect t msg =
+    match msg with
+    | Backend.Auth msg -> handle_auth_message t msg
+    | ParameterStatus s ->
+      Log.debug (fun m ->
+          m "ParameterStatus: (%S, %S)" s.Backend.Parameter_status.name s.value)
+    | NoticeResponse msg ->
+      Log.warn (fun m -> m "PostgresWarning: %S" msg.Backend.Notice_response.message)
+    | ReadyForQuery _ ->
+      t.ready_for_query ();
+      t.ready_for_query <- (fun () -> ())
+    | _ ->
+      (* Ignore other messages during startup *)
+      ()
+
+  let handle_parse t msg =
+    match msg with
+    | Backend.ParseComplete -> ()
+    | ReadyForQuery _ ->
+      t.ready_for_query ();
+      t.ready_for_query <- (fun () -> ())
+    | _ -> ()
+
+  let handle_execute t msg =
+    match msg with
+    | Backend.BindComplete -> ()
+    | ReadyForQuery _ ->
+      t.ready_for_query ();
+      t.ready_for_query <- (fun () -> ());
+      t.on_data_row <- (fun _ -> ())
+    | DataRow row -> t.on_data_row row
+    | _ -> ()
+
+  let handle_message' t msg =
+    match msg with
+    | Backend.ErrorResponse e ->
+      Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
+      t.error_handler (`Postgres_error e)
+    | _ ->
+      (match t.state with
+      | Connect -> handle_connect t msg
+      | Parse -> handle_parse t msg
+      | Execute -> handle_execute t msg)
+
+  let connect ~user ?(password = "") ?database ~error_handler ~finish () =
+    let rec handle_message msg =
+      let t = Lazy.force t in
+      handle_message' t msg
+    and t =
+      lazy
+        { user
+        ; password
+        ; database
+        ; error_handler
+        ; backend_key_data = None
+        ; reader = Parser.create handle_message
+        ; writer = Serializer.create ()
+        ; state = Connect
+        ; ready_for_query = finish
+        ; on_data_row = (fun _ -> ())
+        }
+    in
+    let t = Lazy.force t in
+    let startup_message = Frontend.Startup_message.make ~user ?database () in
+    Serializer.startup t.writer startup_message;
+    Serializer.wakeup_writer t.writer;
+    t
+
+  let prepare conn ~statement ~name ?(oids = Array.of_list []) ~finish () =
+    let prepare = { Frontend.Parse.name; statement; oids } in
+    Serializer.parse conn.writer prepare;
+    Serializer.sync conn.writer;
+    Serializer.wakeup_writer conn.writer;
+    conn.ready_for_query <- finish;
+    conn.state <- Parse
+
+  let execute conn ?(name = "") ?statement ?(parameters = [||]) on_data finish =
+    conn.ready_for_query <- finish;
+    conn.state <- Execute;
+    conn.on_data_row <- on_data;
+    let b = Frontend.Bind.make ~destination:name ?statement ~parameters () in
+    Serializer.bind conn.writer b;
+    let e = Frontend.Execute.make ~name `Unlimited () in
+    Serializer.execute conn.writer e;
+    Serializer.sync conn.writer;
+    Serializer.wakeup_writer conn.writer
 end
