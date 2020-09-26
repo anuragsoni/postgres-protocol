@@ -266,36 +266,25 @@ module Parser : sig
   val force_close : t -> unit
 end
 
-module Ctx : sig
+module Connection : sig
+  exception Auth_method_not_implemented of string
+
   type error =
     [ `Exn of exn
-    | `Parse_error of string
     | `Postgres_error of Backend.Error_response.t
+    | `Parse_error of string
     ]
 
+  type error_handler = error -> unit
   type t
 
-  val create
+  val connect
     :  user:string
     -> ?password:string
     -> ?database:string
-    -> ?size:int
-    -> (error -> unit)
-    -> (unit -> unit)
+    -> error_handler:error_handler
+    -> finish:(unit -> unit)
     -> unit
-    -> t
-end
-
-module Connection : sig
-  type t
-
-  val create
-    :  user:string
-    -> ?password:string
-    -> ?database:string
-    -> ?size:int
-    -> ?error_handler:(Ctx.error -> unit)
-    -> (unit -> unit)
     -> t
 
   val next_write_operation

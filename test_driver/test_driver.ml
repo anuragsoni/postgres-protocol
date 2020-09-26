@@ -13,8 +13,21 @@ let connect socket ~user ~password () =
   Lwt.on_success finished (fun () ->
       Logs.info (fun m -> m "Logged in to postgres database"));
   let conn =
-    Postgres_protocol.Connection.create ~user ~password (fun () ->
-        Lwt.wakeup_later wakeup_finished ())
+    Postgres_protocol.Connection.connect
+      ~user
+      ~password
+      ~finish:(fun () -> Lwt.wakeup_later wakeup_finished ())
+      ~error_handler:(fun e ->
+        match e with
+        | `Exn exn -> Logs.err (fun m -> m "%s" (Printexc.to_string exn))
+        | `Parse_error msg -> Logs.err (fun m -> m "Parse error: %S" msg)
+        | `Postgres_error e ->
+          Logs.err (fun m ->
+              m
+                "postgres_error: %S"
+                (e.Postgres_protocol.Backend.Error_response.message
+                |> Postgres_protocol.Types.Optional_string.to_string)))
+      ()
   in
   let* () =
     Lwt.map

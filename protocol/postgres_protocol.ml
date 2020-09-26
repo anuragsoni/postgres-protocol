@@ -649,90 +649,107 @@ module Parser = struct
   let force_close t = t.closed <- true
 end
 
-module Ctx = struct
+module Connection = struct
+  exception Auth_method_not_implemented of string
+
   type error =
-    [ `Postgres_error of Backend.Error_response.t
+    [ `Exn of exn
+    | `Postgres_error of Backend.Error_response.t
     | `Parse_error of string
-    | `Exn of exn
     ]
 
+  type error_handler = error -> unit
+
+  type state =
+    | Connect
+    | Ready_for_query
+
+  (* | Parse *)
+  (* | Bind *)
+  (* | Execute *)
+
   type t =
-    { writer : Serializer.t
-    ; user : string
+    { user : string
     ; password : string
     ; database : string option
-    ; mutable ready_for_query : bool
-    ; error_handler : error -> unit
-    ; auth_handler : unit -> unit
+    ; backend_key_data : Backend.Backend_key_data.t option
+    ; error_handler : error_handler
+    ; reader : Parser.t
+    ; writer : Serializer.t
+    ; mutable state : state
+    ; mutable report_login : unit -> unit
+    ; mutable logged_in : bool
     }
 
-  let create ~user ?(password = "") ?database ?size error_handler auth_handler () =
-    let writer = Serializer.create ?size () in
-    { writer
-    ; user
-    ; password
-    ; database
-    ; ready_for_query = false
-    ; error_handler
-    ; auth_handler
-    }
-end
-
-module Connection = struct
-  let handle_auth_message ctx = function
+  let handle_auth_message t msg =
+    let r msg = raise @@ Auth_method_not_implemented msg in
+    match msg with
     | Backend.Auth.Ok -> ()
     | Md5Password salt ->
-      let hash = Auth.Md5.hash ~username:ctx.Ctx.user ~password:ctx.password ~salt in
-      Serializer.password ctx.writer (Frontend.Password_message.Md5 hash);
-      Serializer.wakeup_writer ctx.writer
-    | KerberosV5
-    | CleartextPassword
-    | SCMCredential
-    | GSS
-    | SSPI
-    | GSSContinue _
-    | SASL _
-    | SASLContinue _
-    | SASLFinal _ -> failwith "Auth method not implemented yet"
+      let hash = Auth.Md5.hash ~username:t.user ~password:t.password ~salt in
+      let password_message = Frontend.Password_message.Md5 hash in
+      Serializer.password t.writer password_message;
+      Serializer.wakeup_writer t.writer
+    | KerberosV5 -> r "kerberos"
+    | CleartextPassword -> r "clear text password"
+    | SCMCredential -> r "SCMCredential"
+    | GSS -> r "GSS"
+    | SSPI -> r "SSPI"
+    | GSSContinue _ -> r "GSSContinue"
+    | SASL _ -> r "SASL"
+    | SASLContinue _ -> r "SASLContinue"
+    | SASLFinal _ -> r "SASLFinal"
 
-  let handle_message ctx msg =
+  let handle_connect t msg =
     match msg with
-    | Backend.Auth msg -> handle_auth_message ctx msg
+    | Backend.Auth msg -> handle_auth_message t msg
     | ReadyForQuery _ ->
-      Logs.info (fun m -> m "Ready for query now");
-      ctx.auth_handler ()
+      Log.debug (fun m -> m "Ready for query");
+      t.state <- Ready_for_query;
+      t.logged_in <- true;
+      t.report_login ()
+    | ParameterStatus s ->
+      Log.debug (fun m ->
+          m "ParameterStatus: (%S, %S)" s.Backend.Parameter_status.name s.value)
+    | ErrorResponse e ->
+      Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
+      t.error_handler (`Postgres_error e)
+    | NoticeResponse msg ->
+      Log.warn (fun m -> m "PostgresWarning: %S" msg.Backend.Notice_response.message)
     | _ ->
-      (* TODO: handle the remaining backend messages *)
-      Logs.warn (fun m -> m "Message handler not implemented")
+      (* Ignore other messages during startup *)
+      ()
 
-  type t =
-    { reader : Parser.t
-    ; ctx : Ctx.t
-    }
+  let handle_message' t msg =
+    match t.state with
+    | Connect -> handle_connect t msg
+    | _ -> failwith "Not implemented yet"
 
-  let default_error_handler e =
-    match e with
-    | `Exn exn -> Log.err (fun m -> m "%s" (Printexc.to_string exn))
-    | `Parse_error msg ->
-      Log.err (fun m -> m "Error while parsing postgres message: %S" msg)
-    | `Postgres_error msg ->
-      Log.err (fun m ->
-          m "Error received from postgres: %S" msg.Backend.Error_response.message)
-
-  let create
-      ~user
-      ?password
-      ?database
-      ?size
-      ?(error_handler = default_error_handler)
-      auth_handler
-    =
-    let ctx = Ctx.create ~user ?password ?database ?size error_handler auth_handler () in
+  let connect ~user ?(password = "") ?database ~error_handler ~finish () =
+    let rec handle_message msg =
+      let t = Lazy.force t in
+      handle_message' t msg
+    and t =
+      lazy
+        { user
+        ; password
+        ; database
+        ; error_handler
+        ; backend_key_data = None
+        ; reader = Parser.create handle_message
+        ; writer = Serializer.create ()
+        ; state = Connect
+        ; report_login = finish
+        ; logged_in = false
+        }
+    in
+    let t = Lazy.force t in
     let startup_message = Frontend.Startup_message.make ~user ?database () in
-    Serializer.startup ctx.Ctx.writer startup_message;
-    { reader = Parser.create (handle_message ctx); ctx }
+    Serializer.startup t.writer startup_message;
+    Serializer.wakeup_writer t.writer;
+    t
 
-  let next_write_operation t = Serializer.next_operation t.ctx.writer
+  let next_write_operation t = Serializer.next_operation t.writer
   let next_read_operation t = Parser.next_action t.reader
 
   let read t buf ~off ~len =
@@ -741,14 +758,17 @@ module Connection = struct
   let read_eof t buf ~off ~len =
     Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Complete
 
-  let yield_reader _t _thunk = ()
-  let report_write_result t res = Serializer.report_write_result t.ctx.writer res
-  let report_exn t exn = t.ctx.error_handler (`Exn exn)
-  let is_closed t = Parser.is_closed t.reader && Serializer.is_closed t.ctx.writer
+  let yield_reader _t thunk = thunk ()
+  let yield_writer t thunk = Serializer.yield_writer t.writer thunk
+  let report_write_result t res = Serializer.report_write_result t.writer res
 
   let shutdown t =
     Parser.force_close t.reader;
-    Serializer.close_and_drain t.ctx.writer
+    Serializer.close_and_drain t.writer
 
-  let yield_writer t thunk = Serializer.yield_writer t.ctx.writer thunk
+  let is_closed t = Parser.is_closed t.reader && Serializer.is_closed t.writer
+
+  let report_exn t exn =
+    shutdown t;
+    t.error_handler (`Exn exn)
 end
