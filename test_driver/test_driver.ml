@@ -75,6 +75,6 @@ let run () =
 
 let () =
   Logs.set_reporter (Logs_fmt.reporter ());
-  Logs.set_level ~all:true (Some Debug);
+  Logs.set_level ~all:true (Some Info);
   Fmt_tty.setup_std_outputs ();
   Lwt_main.run (run ())
