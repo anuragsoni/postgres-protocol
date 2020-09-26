@@ -13,12 +13,8 @@ let connect socket ~user ~password () =
   Lwt.on_success finished (fun () ->
       Logs.info (fun m -> m "Logged in to postgres database"));
   let conn =
-    Postgres_protocol.Connection.create
-      ~user
-      ~password
-      (fun () -> Lwt.wakeup_later wakeup_finished ())
-      (fun _error -> (* TODO: Handle errors *) ())
-      ()
+    Postgres_protocol.Connection.create ~user ~password (fun () ->
+        Lwt.wakeup_later wakeup_finished ())
   in
   let* () =
     Lwt.map

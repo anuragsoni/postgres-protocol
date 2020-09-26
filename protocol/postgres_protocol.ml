@@ -520,7 +520,6 @@ module Backend = struct
     Header.parse
     <* commit
     >>= fun ({ kind; length } as header) ->
-    Logs.info (fun m -> m "Message of kind %C" kind);
     match kind with
     | 'R' -> lift (fun m -> Auth m) @@ Auth.parse header
     | 'K' -> lift (fun m -> BackendKeyData m) @@ Backend_key_data.parse header
@@ -683,7 +682,6 @@ module Connection = struct
   let handle_auth_message ctx = function
     | Backend.Auth.Ok -> ()
     | Md5Password salt ->
-      Logs.info (fun m -> m "auth message");
       let hash = Auth.Md5.hash ~username:ctx.Ctx.user ~password:ctx.password ~salt in
       Serializer.password ctx.writer (Frontend.Password_message.Md5 hash);
       Serializer.wakeup_writer ctx.writer
@@ -703,14 +701,32 @@ module Connection = struct
     | ReadyForQuery _ ->
       Logs.info (fun m -> m "Ready for query now");
       ctx.auth_handler ()
-    | _ -> ()
+    | _ ->
+      (* TODO: handle the remaining backend messages *)
+      Logs.warn (fun m -> m "Message handler not implemented")
 
   type t =
     { reader : Parser.t
     ; ctx : Ctx.t
     }
 
-  let create ~user ?password ?database ?size auth_handler error_handler () =
+  let default_error_handler e =
+    match e with
+    | `Exn exn -> Log.err (fun m -> m "%s" (Printexc.to_string exn))
+    | `Parse_error msg ->
+      Log.err (fun m -> m "Error while parsing postgres message: %S" msg)
+    | `Postgres_error msg ->
+      Log.err (fun m ->
+          m "Error received from postgres: %S" msg.Backend.Error_response.message)
+
+  let create
+      ~user
+      ?password
+      ?database
+      ?size
+      ?(error_handler = default_error_handler)
+      auth_handler
+    =
     let ctx = Ctx.create ~user ?password ?database ?size error_handler auth_handler () in
     let startup_message = Frontend.Startup_message.make ~user ?database () in
     Serializer.startup ctx.Ctx.writer startup_message;
@@ -727,7 +743,7 @@ module Connection = struct
 
   let yield_reader _t _thunk = ()
   let report_write_result t res = Serializer.report_write_result t.ctx.writer res
-  let report_exn _t _exn = ()
+  let report_exn t exn = t.ctx.error_handler (`Exn exn)
   let is_closed t = Parser.is_closed t.reader && Serializer.is_closed t.ctx.writer
 
   let shutdown t =
