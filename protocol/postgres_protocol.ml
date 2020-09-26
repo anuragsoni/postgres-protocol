@@ -669,8 +669,9 @@ module Connection = struct
     | Connect
     | Ready_for_query
     | Parse
-    (* | Bind *)
-    (* | Execute *)
+
+  (* | Bind *)
+  (* | Execute *)
 
   type t =
     { user : string
@@ -682,7 +683,6 @@ module Connection = struct
     ; writer : Serializer.t
     ; mutable state : state
     ; mutable ready_for_query : unit -> unit
-    ; mutable logged_in : bool
     }
 
   let handle_auth_message t msg =
@@ -710,14 +710,10 @@ module Connection = struct
     | ReadyForQuery _ ->
       Log.debug (fun m -> m "Ready for query");
       t.state <- Ready_for_query;
-      t.logged_in <- true;
       t.ready_for_query ()
     | ParameterStatus s ->
       Log.debug (fun m ->
           m "ParameterStatus: (%S, %S)" s.Backend.Parameter_status.name s.value)
-    | ErrorResponse e ->
-      Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
-      t.error_handler (`Postgres_error e)
     | NoticeResponse msg ->
       Log.warn (fun m -> m "PostgresWarning: %S" msg.Backend.Notice_response.message)
     | _ ->
@@ -726,18 +722,20 @@ module Connection = struct
 
   let handle_parse t msg =
     match msg with
-    | Backend.ErrorResponse e ->
-      Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
-      t.error_handler (`Postgres_error e)
-    | ParseComplete -> ()
+    | Backend.ParseComplete -> ()
     | ReadyForQuery _ -> t.ready_for_query ()
     | _ -> ()
 
   let handle_message' t msg =
-    match t.state with
-    | Connect -> handle_connect t msg
-    | Parse -> handle_parse t msg
-    | _ -> failwith "Not implemented yet"
+    match msg with
+    | Backend.ErrorResponse e ->
+      Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
+      t.error_handler (`Postgres_error e)
+    | _ ->
+      (match t.state with
+      | Connect -> handle_connect t msg
+      | Parse -> handle_parse t msg
+      | _ -> failwith "Not implemented yet")
 
   let connect ~user ?(password = "") ?database ~error_handler ~finish () =
     let rec handle_message msg =
@@ -754,7 +752,6 @@ module Connection = struct
         ; writer = Serializer.create ()
         ; state = Connect
         ; ready_for_query = finish
-        ; logged_in = false
         }
     in
     let t = Lazy.force t in
