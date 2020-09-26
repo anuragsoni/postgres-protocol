@@ -39,7 +39,7 @@ let connect socket ~user ~password () =
          socket)
   in
   let* () = finished in
-  let statement = "SELECT id, email from users where email IN ($1, $2, $3)" in
+  let statement = "SELECT id, email from users where id IN ($1, $2, $3)" in
   let prepare, wakeup_prepare = Lwt.wait () in
   Postgres_protocol.Connection.prepare
     ~finish:(fun () -> Lwt.wakeup_later wakeup_prepare ())
@@ -49,17 +49,15 @@ let connect socket ~user ~password () =
     ();
   let* () = prepare in
   let execute, wakeup_execute = Lwt.wait () in
+  let make_id id =
+    let b = Bytes.create 4 in
+    Bytes.set_int32_be b 0 id;
+    Postgres_protocol.Frontend.Bind.make_param ~parameter:(Bytes.to_string b) `Binary ()
+  in
   Postgres_protocol.Connection.execute
     ~statement:"user_search_query"
     conn
-    ~parameters:
-      [| Postgres_protocol.Frontend.Bind.make_param ~parameter:"user_5@gmail.com" `Text ()
-       ; Postgres_protocol.Frontend.Bind.make_param ~parameter:"user_2@gmail.com" `Text ()
-       ; Postgres_protocol.Frontend.Bind.make_param
-           ~parameter:"user_9@hotmail.com"
-           `Text
-           ()
-      |]
+    ~parameters:[| make_id 2l; make_id 4l; make_id 9l |]
     ~on_data_row:(fun data_row ->
       match data_row with
       | [ id; name ] ->
