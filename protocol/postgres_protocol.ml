@@ -514,12 +514,15 @@ module Backend = struct
     | NoticeResponse of Notice_response.t
     | ParameterStatus of Parameter_status.t
     | ReadyForQuery of Ready_for_query.t
+    | ParseComplete
+    | BindComplete
     | UnknownMessage of char
 
   let parse =
     Header.parse
     <* commit
     >>= fun ({ kind; length } as header) ->
+    Log.debug (fun m -> m "Message received of kind: %C" kind);
     match kind with
     | 'R' -> lift (fun m -> Auth m) @@ Auth.parse header
     | 'K' -> lift (fun m -> BackendKeyData m) @@ Backend_key_data.parse header
@@ -527,6 +530,8 @@ module Backend = struct
     | 'N' -> lift (fun m -> NoticeResponse m) @@ Notice_response.parse header
     | 'S' -> lift (fun m -> ParameterStatus m) @@ Parameter_status.parse header
     | 'Z' -> lift (fun m -> ReadyForQuery m) @@ Ready_for_query.parse header
+    | '1' -> return ParseComplete
+    | '2' -> return BindComplete
     | c ->
       Log.warn (fun m -> m "Received an unknown message with ident: %C" c);
       take (length - 4) *> (return @@ UnknownMessage c)
@@ -663,10 +668,9 @@ module Connection = struct
   type state =
     | Connect
     | Ready_for_query
-
-  (* | Parse *)
-  (* | Bind *)
-  (* | Execute *)
+    | Parse
+    (* | Bind *)
+    (* | Execute *)
 
   type t =
     { user : string
@@ -677,7 +681,7 @@ module Connection = struct
     ; reader : Parser.t
     ; writer : Serializer.t
     ; mutable state : state
-    ; mutable report_login : unit -> unit
+    ; mutable ready_for_query : unit -> unit
     ; mutable logged_in : bool
     }
 
@@ -707,7 +711,7 @@ module Connection = struct
       Log.debug (fun m -> m "Ready for query");
       t.state <- Ready_for_query;
       t.logged_in <- true;
-      t.report_login ()
+      t.ready_for_query ()
     | ParameterStatus s ->
       Log.debug (fun m ->
           m "ParameterStatus: (%S, %S)" s.Backend.Parameter_status.name s.value)
@@ -720,9 +724,19 @@ module Connection = struct
       (* Ignore other messages during startup *)
       ()
 
+  let handle_parse t msg =
+    match msg with
+    | Backend.ErrorResponse e ->
+      Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
+      t.error_handler (`Postgres_error e)
+    | ParseComplete -> ()
+    | ReadyForQuery _ -> t.ready_for_query ()
+    | _ -> ()
+
   let handle_message' t msg =
     match t.state with
     | Connect -> handle_connect t msg
+    | Parse -> handle_parse t msg
     | _ -> failwith "Not implemented yet"
 
   let connect ~user ?(password = "") ?database ~error_handler ~finish () =
@@ -739,7 +753,7 @@ module Connection = struct
         ; reader = Parser.create handle_message
         ; writer = Serializer.create ()
         ; state = Connect
-        ; report_login = finish
+        ; ready_for_query = finish
         ; logged_in = false
         }
     in
@@ -748,6 +762,17 @@ module Connection = struct
     Serializer.startup t.writer startup_message;
     Serializer.wakeup_writer t.writer;
     t
+
+  let prepare conn ~statement ~name ?(oids = Array.of_list []) ~finish () =
+    match conn.state with
+    | Ready_for_query ->
+      let prepare = { Frontend.Parse.name; statement; oids } in
+      Serializer.parse conn.writer prepare;
+      Serializer.sync conn.writer;
+      Serializer.wakeup_writer conn.writer;
+      conn.ready_for_query <- finish;
+      conn.state <- Parse
+    | _ -> failwith "Can't call prepare"
 
   let next_write_operation t = Serializer.next_operation t.writer
   let next_read_operation t = Parser.next_action t.reader

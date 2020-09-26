@@ -38,7 +38,17 @@ let connect socket ~user ~password () =
          conn
          socket)
   in
-  finished
+  let* () = finished in
+  let statement = "SELECT id from users where email = ($1)" in
+  let name = "user_search_query" in
+  let prepare, wakeup_prepare = Lwt.wait () in
+  Postgres_protocol.Connection.prepare
+    ~finish:(fun () -> Lwt.wakeup_later wakeup_prepare ())
+    ~name
+    ~statement
+    conn
+    ();
+  prepare
 
 let run () =
   let* socket = create_socket "localhost" 5432 in

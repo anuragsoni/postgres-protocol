@@ -215,6 +215,8 @@ module Backend : sig
     | NoticeResponse of Notice_response.t
     | ParameterStatus of Parameter_status.t
     | ReadyForQuery of Ready_for_query.t
+    | ParseComplete
+    | BindComplete
     | UnknownMessage of char
 
   val parse : message Angstrom.t
@@ -286,6 +288,15 @@ module Connection : sig
     -> finish:(unit -> unit)
     -> unit
     -> t
+
+  val prepare
+    :  t
+    -> statement:string
+    -> name:string
+    -> ?oids:Types.Oid.t array
+    -> finish:(unit -> unit)
+    -> unit
+    -> unit
 
   val next_write_operation
     :  t
