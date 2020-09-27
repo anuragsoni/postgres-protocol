@@ -729,7 +729,8 @@ module Connection = struct
 
   let shutdown t =
     Parser.force_close t.reader;
-    Serializer.close_and_drain t.writer
+    Serializer.close_and_drain t.writer;
+    Serializer.wakeup_writer t.writer
 
   let is_closed t = Parser.is_closed t.reader && Serializer.is_closed t.writer
 
@@ -842,4 +843,8 @@ module Connection = struct
     Serializer.execute conn.writer e;
     Serializer.sync conn.writer;
     Serializer.wakeup_writer conn.writer
+
+  let close conn =
+    Serializer.terminate conn.writer;
+    shutdown conn
 end

@@ -65,7 +65,8 @@ let connect socket ~user ~password () =
         Logs.info (fun m -> m "Id: %a and email: %a" pp_opt id pp_opt name)
       | _ -> assert false)
     (fun () -> Lwt.wakeup_later wakeup_execute ());
-  execute
+  let+ () = execute in
+  Postgres_protocol.Connection.close conn
 
 let run () =
   let* socket = create_socket "localhost" 5432 in

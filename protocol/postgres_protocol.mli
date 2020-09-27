@@ -352,6 +352,8 @@ module Connection : sig
     -> (unit -> unit)
     -> unit
 
+  val close : t -> unit
+
   val next_write_operation
     :  t
     -> [> `Close of int | `Write of Faraday.bigstring Faraday.iovec list | `Yield ]

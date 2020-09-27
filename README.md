@@ -3,7 +3,6 @@ Work-in-progress IO agnostic postgres client
 Incomplete TODO list:
 
 * Tests (Lots of tests)
-* close connection
 * better error handling
 * add functions that'll clean up by closing connections after finishing a task
 * support binary format for parameters
