@@ -102,7 +102,7 @@ module Frontend : sig
   end
 
   module Password_message : sig
-    type t = Md5 of string
+    type t = Md5_or_plain of string
   end
 
   module Parse : sig

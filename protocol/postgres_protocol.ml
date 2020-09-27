@@ -176,10 +176,10 @@ module Frontend = struct
   module Password_message = struct
     let ident = Some 'p'
 
-    type t = Md5 of string
+    type t = Md5_or_plain of string
 
-    let size (Md5 s) = String.length s + 1
-    let write f (Md5 s) = write_cstr f s
+    let size (Md5_or_plain s) = String.length s + 1
+    let write f (Md5_or_plain s) = write_cstr f s
   end
 
   module Parse = struct
@@ -744,11 +744,14 @@ module Connection = struct
     | Backend.Auth.Ok -> ()
     | Md5Password salt ->
       let hash = Auth.Md5.hash ~username:t.user ~password:t.password ~salt in
-      let password_message = Frontend.Password_message.Md5 hash in
+      let password_message = Frontend.Password_message.Md5_or_plain hash in
       Serializer.password t.writer password_message;
       Serializer.wakeup_writer t.writer
     | KerberosV5 -> r "kerberos"
-    | CleartextPassword -> r "clear text password"
+    | CleartextPassword ->
+      let password_message = Frontend.Password_message.Md5_or_plain t.password in
+      Serializer.password t.writer password_message;
+      Serializer.wakeup_writer t.writer
     | SCMCredential -> r "SCMCredential"
     | GSS -> r "GSS"
     | SSPI -> r "SSPI"
