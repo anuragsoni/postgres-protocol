@@ -9,6 +9,13 @@ let create_socket host port =
   let+ () = Lwt_unix.connect socket (List.hd addresses).ai_addr in
   socket
 
+module Throttle = struct
+  type 'a t = 'a * Lwt_mutex.t
+
+  let create conn = conn, Lwt_mutex.create ()
+  let enqueue (conn, mutex) run = Lwt_mutex.with_lock mutex (fun () -> run conn)
+end
+
 let connect ~host ~port ~user ?password ?database ~error_handler () =
   let* socket = create_socket host port in
   let finished, wakeup_finished = Lwt.wait () in
@@ -29,21 +36,27 @@ let connect ~host ~port ~user ?password ?database ~error_handler () =
       socket
   in
   let+ () = finished in
-  conn
+  Throttle.create conn
 
 let prepare conn ~statement ?name ?oids () =
-  let finished, wakeup = Lwt.wait () in
-  Connection.prepare
-    conn
-    ~statement
-    ?name
-    ?oids
-    ~finish:(fun () -> Lwt.wakeup_later wakeup ())
-    ();
-  finished
+  let run conn =
+    let finished, wakeup = Lwt.wait () in
+    Connection.prepare
+      conn
+      ~statement
+      ?name
+      ?oids
+      ~finish:(fun () -> Lwt.wakeup_later wakeup ())
+      ();
+    finished
+  in
+  Throttle.enqueue conn run
 
 let execute conn ?name ?statement ?parameters ~on_data_row () =
-  let finished, wakeup = Lwt.wait () in
-  Connection.execute conn ?name ?statement ?parameters ~on_data_row (fun () ->
-      Lwt.wakeup_later wakeup ());
-  finished
+  let run conn =
+    let finished, wakeup = Lwt.wait () in
+    Connection.execute conn ?name ?statement ?parameters ~on_data_row (fun () ->
+        Lwt.wakeup_later wakeup ());
+    finished
+  in
+  Throttle.enqueue conn run

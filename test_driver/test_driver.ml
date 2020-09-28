@@ -44,20 +44,12 @@ let connect () =
     ~error_handler
     ()
 
-module Sequencer = struct
-  type 'a t = 'a * Lwt_mutex.t
-
-  let create t = t, Lwt_mutex.create ()
-  let enqueue (t, mutex) f = Lwt_mutex.with_lock mutex (fun () -> f t)
-end
-
 let () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level ~all:true (Some Info);
   Fmt_tty.setup_std_outputs ();
   Lwt_main.run
     (let* conn = connect () in
-     let sequencer = Sequencer.create conn in
-     let+ () = Sequencer.enqueue sequencer run
-     and+ () = Sequencer.enqueue sequencer run in
+     let+ () = run conn
+     and+ () = run conn in
      ())
