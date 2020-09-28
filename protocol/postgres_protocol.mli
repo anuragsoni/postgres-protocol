@@ -337,7 +337,7 @@ module Connection : sig
   val prepare
     :  t
     -> statement:string
-    -> name:string
+    -> ?name:string
     -> ?oids:Types.Oid.t array
     -> finish:(unit -> unit)
     -> unit

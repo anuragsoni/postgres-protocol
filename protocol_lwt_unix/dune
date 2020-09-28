@@ -1,0 +1,4 @@
+(library
+ (name postgres_protocol_lwt_unix)
+ (public_name postgres-protocol-lwt-unix)
+ (libraries lwt.unix postgres-protocol gluten-lwt-unix))

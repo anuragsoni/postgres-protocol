@@ -28,3 +28,15 @@
   logs
   (alcotest :with-test)
   (qcheck-alcotest :with-test)))
+
+(package
+ (name postgres-protocol-lwt-unix)
+ (tags (postgres))
+ (depends
+  (ocaml
+   (>= 4.08))
+  (postgres-protocol
+   (= :version))
+  lwt
+  gluten-lwt-unix
+  tls))

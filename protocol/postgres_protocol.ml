@@ -828,7 +828,14 @@ module Connection = struct
     Serializer.wakeup_writer t.writer;
     t
 
-  let prepare conn ~statement ~name ?(oids = Array.of_list []) ~finish () =
+  let prepare
+      conn
+      ~statement
+      ?(name = Optional_string.empty)
+      ?(oids = Array.of_list [])
+      ~finish
+      ()
+    =
     let prepare = { Frontend.Parse.name; statement; oids } in
     Serializer.parse conn.writer prepare;
     Serializer.sync conn.writer;
