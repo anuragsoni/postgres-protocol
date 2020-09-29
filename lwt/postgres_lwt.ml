@@ -55,3 +55,9 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row t =
     on_data_row
     (Lwt.wakeup_later wakeup);
   finished
+
+let close t =
+  Throttle.enqueue t
+  @@ fun conn ->
+  Connection.close conn;
+  Lwt.return_unit

@@ -52,5 +52,5 @@ let () =
      let* conn = connect socket "asoni" "password" in
      let* () = run conn
      and* () = run conn in
-     Logs.info (fun m -> m "Finished");
-     Lwt_unix.close socket)
+     let+ () = Postgres_lwt.close conn in
+     Logs.info (fun m -> m "Finished"))

@@ -21,3 +21,5 @@ val execute
   -> (string option list -> unit)
   -> t
   -> unit Lwt.t
+
+val close : t -> unit Lwt.t
