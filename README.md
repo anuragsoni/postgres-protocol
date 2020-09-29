@@ -9,7 +9,6 @@ Incomplete TODO list:
 * Support additional auth methods (only MD5 and cleartext is implemented at the moment)
 * Support SSL/TLS connections
 * Add parser/serializer for all postgres backend/frontend messages
-* add libraries that provide a higher level lwt/async interface (Lwt library is in progress)
 * add wrapper to handle parameters in an easier manner
 * documentation
 
