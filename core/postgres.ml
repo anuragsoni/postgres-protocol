@@ -688,6 +688,16 @@ end
 module Connection = struct
   exception Auth_method_not_implemented of string
 
+  module User_info = struct
+    type t =
+      { user : string
+      ; password : string
+      ; database : string option
+      }
+
+    let make ~user ?(password = "") ?database () = { user; password; database }
+  end
+
   type error =
     [ `Exn of exn
     | `Postgres_error of Backend.Error_response.t
@@ -702,13 +712,11 @@ module Connection = struct
     | Execute
 
   type t =
-    { user : string
-    ; password : string
-    ; database : string option
+    { user_info : User_info.t
     ; backend_key_data : Backend.Backend_key_data.t option
-    ; error_handler : error_handler
     ; reader : Parser.t
     ; writer : Serializer.t
+    ; mutable on_error : error_handler
     ; mutable state : mode
     ; mutable ready_for_query : unit -> unit
     ; mutable on_data_row : string option list -> unit
@@ -736,20 +744,24 @@ module Connection = struct
 
   let report_exn t exn =
     shutdown t;
-    t.error_handler (`Exn exn)
+    t.on_error (`Exn exn)
 
   let handle_auth_message t msg =
     let r msg = raise @@ Auth_method_not_implemented msg in
     match msg with
     | Backend.Auth.Ok -> ()
     | Md5Password salt ->
-      let hash = Auth.Md5.hash ~username:t.user ~password:t.password ~salt in
+      let hash =
+        Auth.Md5.hash ~username:t.user_info.user ~password:t.user_info.password ~salt
+      in
       let password_message = Frontend.Password_message.Md5_or_plain hash in
       Serializer.password t.writer password_message;
       Serializer.wakeup_writer t.writer
     | KerberosV5 -> r "kerberos"
     | CleartextPassword ->
-      let password_message = Frontend.Password_message.Md5_or_plain t.password in
+      let password_message =
+        Frontend.Password_message.Md5_or_plain t.user_info.password
+      in
       Serializer.password t.writer password_message;
       Serializer.wakeup_writer t.writer
     | SCMCredential -> r "SCMCredential"
@@ -797,23 +809,21 @@ module Connection = struct
     match msg with
     | Backend.ErrorResponse e ->
       Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
-      t.error_handler (`Postgres_error e)
+      t.on_error (`Postgres_error e)
     | _ ->
       (match t.state with
       | Connect -> handle_connect t msg
       | Parse -> handle_parse t msg
       | Execute -> handle_execute t msg)
 
-  let connect ~user ?(password = "") ?database ~error_handler ~finish () =
+  let connect user_info on_error finish =
     let rec handle_message msg =
       let t = Lazy.force t in
       handle_message' t msg
     and t =
       lazy
-        { user
-        ; password
-        ; database
-        ; error_handler
+        { user_info
+        ; on_error
         ; backend_key_data = None
         ; reader = Parser.create handle_message
         ; writer = Serializer.create ()
@@ -823,7 +833,9 @@ module Connection = struct
         }
     in
     let t = Lazy.force t in
-    let startup_message = Frontend.Startup_message.make ~user ?database () in
+    let startup_message =
+      Frontend.Startup_message.make ~user:user_info.user ?database:user_info.database ()
+    in
     Serializer.startup t.writer startup_message;
     Serializer.wakeup_writer t.writer;
     t
@@ -832,24 +844,34 @@ module Connection = struct
       conn
       ~statement
       ?(name = Optional_string.empty)
-      ?(oids = Array.of_list [])
-      ~finish
-      ()
+      ?(oids = [||])
+      on_error
+      finish
     =
+    conn.on_error <- on_error;
+    conn.ready_for_query <- finish;
+    conn.state <- Parse;
     let prepare = { Frontend.Parse.name; statement; oids } in
     Serializer.parse conn.writer prepare;
     Serializer.sync conn.writer;
-    Serializer.wakeup_writer conn.writer;
-    conn.ready_for_query <- finish;
-    conn.state <- Parse
+    Serializer.wakeup_writer conn.writer
 
-  let execute conn ?(name = "") ?statement ?(parameters = [||]) ~on_data_row finish =
+  let execute
+      conn
+      ?(name = "")
+      ?(statement = "")
+      ?(parameters = [||])
+      on_error
+      on_data_row
+      finish
+    =
+    conn.on_error <- on_error;
     conn.ready_for_query <- finish;
     conn.state <- Execute;
     conn.on_data_row <- on_data_row;
-    let b = Frontend.Bind.make ~destination:name ?statement ~parameters () in
-    Serializer.bind conn.writer b;
+    let b = Frontend.Bind.make ~destination:name ~statement ~parameters () in
     let e = Frontend.Execute.make ~name `Unlimited () in
+    Serializer.bind conn.writer b;
     Serializer.execute conn.writer e;
     Serializer.sync conn.writer;
     Serializer.wakeup_writer conn.writer

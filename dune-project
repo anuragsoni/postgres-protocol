@@ -16,8 +16,9 @@
 (license BSD-3-clause)
 
 (package
- (name postgres-protocol)
- (tags (postgres))
+ (name postgres)
+ (tags
+  (postgres postgresql))
  (depends
   (ocaml
    (>= 4.08))
@@ -30,13 +31,12 @@
   (qcheck-alcotest :with-test)))
 
 (package
- (name postgres-protocol-lwt-unix)
- (tags (postgres))
+ (name postgres-lwt)
+ (tags
+  (postgres postgresql))
  (depends
   (ocaml
    (>= 4.08))
-  (postgres-protocol
+  (postgres
    (= :version))
-  lwt
-  gluten-lwt-unix
-  tls))
+  lwt))
