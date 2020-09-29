@@ -1,21 +1,4 @@
 Work-in-progress IO agnostic postgres client
-
-Incomplete TODO list:
-
-* Tests (Lots of tests)
-* better error handling
-* add functions that'll clean up by closing connections after finishing a task
-* support binary format for parameters
-* Support additional auth methods (only MD5 and cleartext is implemented at the moment)
-* Support SSL/TLS connections
-* Add parser/serializer for all postgres backend/frontend messages
-* add wrapper to handle parameters in an easier manner
-* documentation
-
-Notes:
-
-Documentation used for this implementation: https://www.postgresql.org/docs/12/protocol.html
-
 ```ocaml
 open Lwt.Syntax
 
@@ -33,19 +16,19 @@ let connect socket user password =
       ())
     user_info
 
-let run conn =
-  let* () =
-    Postgres_lwt.prepare
-      ~statement:"SELECT id, email from users where id IN ($1, $2, $3)"
-      conn
-  in
-  let make_id id =
-    let b = Bytes.create 4 in
-    Bytes.set_int32_be b 0 id;
-    Postgres.Frontend.Bind.make_param ~parameter:(Bytes.to_string b) `Binary ()
-  in
+let prepare_query name conn =
+  Postgres_lwt.prepare
+    ~name
+    ~statement:"SELECT id, email from users where id IN ($1, $2, $3)"
+    conn
+
+let run name conn ids =
+  let parameters = make_parameters ids in
+  (* If we use named prepared queries, we can reference them by name later on in the
+     session lifecycle. *)
   Postgres_lwt.execute
-    ~parameters:[| make_id 2l; make_id 4l; make_id 9l |]
+    ~statement:name
+    ~parameters
     (fun data_row ->
       match data_row with
       | [ id; name ] ->
@@ -54,3 +37,20 @@ let run conn =
       | _ -> assert false)
     conn
 ```
+
+Incomplete TODO list:
+
+* Tests (Lots of tests)
+* better error handling
+* add functions that'll clean up by closing connections after finishing a task
+* support binary format for parameters
+* Support additional auth methods (only MD5 and cleartext is implemented at the moment)
+* Support SSL/TLS connections
+* Add parser/serializer for all postgres backend/frontend messages
+* add wrapper to handle parameters in an easier manner
+* documentation
+
+Notes:
+
+Documentation used for this implementation: https://www.postgresql.org/docs/12/protocol.html
+
