@@ -1,0 +1,4 @@
+(library
+ (name postgres_lwt)
+ (public_name postgres-lwt)
+ (libraries lwt postgres))

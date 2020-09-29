@@ -316,6 +316,16 @@ end
 module Connection : sig
   exception Auth_method_not_implemented of string
 
+  module User_info : sig
+    type t =
+      { user : string
+      ; password : string
+      ; database : string option
+      }
+
+    val make : user:string -> ?password:string -> ?database:string -> unit -> t
+  end
+
   type error =
     [ `Exn of exn
     | `Postgres_error of Backend.Error_response.t
@@ -325,22 +335,15 @@ module Connection : sig
   type error_handler = error -> unit
   type t
 
-  val connect
-    :  user:string
-    -> ?password:string
-    -> ?database:string
-    -> error_handler:error_handler
-    -> finish:(unit -> unit)
-    -> unit
-    -> t
+  val connect : User_info.t -> error_handler -> (unit -> unit) -> t
 
   val prepare
     :  t
     -> statement:string
     -> ?name:string
     -> ?oids:Types.Oid.t array
-    -> finish:(unit -> unit)
-    -> unit
+    -> error_handler
+    -> (unit -> unit)
     -> unit
 
   val execute
@@ -348,7 +351,8 @@ module Connection : sig
     -> ?name:string
     -> ?statement:string
     -> ?parameters:Frontend.Bind.parameter array
-    -> on_data_row:(string option list -> unit)
+    -> error_handler
+    -> (string option list -> unit)
     -> (unit -> unit)
     -> unit
 
