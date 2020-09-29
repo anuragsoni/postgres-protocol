@@ -40,3 +40,16 @@
   (postgres
    (= :version))
   lwt))
+
+(package
+ (name pgasync)
+ (tags
+  (postgres postgresql))
+ (depends
+  (ocaml
+   (>= 4.08))
+  (postgres
+   (= :version))
+  ppx_jane
+  core_kernel
+  async_kernel))

@@ -1,0 +1,6 @@
+(library
+ (name pgasync)
+ (public_name pgasync)
+ (preprocess
+  (pps ppx_jane))
+ (libraries postgres async_kernel core_kernel))
