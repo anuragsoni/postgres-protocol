@@ -4,10 +4,3 @@
  (preprocess
   (pps ppx_jane))
  (libraries gluten-lwt-unix postgres logs.fmt fmt.tty postgres-lwt))
-
-(executable
- (modules test_driver_async)
- (name test_driver_async)
- (preprocess
-  (pps ppx_jane))
- (libraries gluten-async postgres core async pgasync))
