@@ -2,6 +2,18 @@ Work-in-progress IO agnostic postgres client
 ```ocaml
 open Lwt.Syntax
 
+(* This example uses a helper utility from postgres-lwt-unix
+   that simplifies the initial connection setup. Users can provide
+   there own connection runners by providing a function
+   `Connection.t -> unit` that drives the protocol state machine.
+   https://github.com/anmonteiro/gluten is an example of one such
+   runner. To avoid postgres-lwt-unix, provide the run function
+   to `Postgres_lwt.connect`.
+
+   Postgres_lwt_unix allows for creating connections via inet or
+   unix domain sockets. Once a socket connection is established, it
+   returns a `Postgres_lwt.t`. All further operations should be done
+   via the functions in the `Postgres_lwt` module. *)
 let connect host port user password =
   let user_info = Postgres.Connection.User_info.make ~user ~password () in
   Postgres_lwt_unix.(connect user_info (Inet (host, port)))
