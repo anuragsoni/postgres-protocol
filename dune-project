@@ -51,5 +51,4 @@
   (postgres-lwt
    (= :version))
   lwt
-  ke
   faraday-lwt-unix))
