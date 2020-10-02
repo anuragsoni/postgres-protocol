@@ -40,3 +40,14 @@
   (postgres
    (= :version))
   lwt))
+
+(package
+ (name postgres-lwt-unix)
+ (tags
+  (postgres postgresql))
+ (depends
+  (ocaml
+   (>= 4.08))
+  (postgres-lwt
+   (= :version))
+  lwt))

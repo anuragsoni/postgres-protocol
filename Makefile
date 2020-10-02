@@ -1,7 +1,7 @@
 .PHONY: build clean test deps
 
 build:
-	dune build @install
+	dune build
 
 clean:
 	dune clean
