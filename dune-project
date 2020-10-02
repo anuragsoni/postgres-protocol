@@ -50,4 +50,6 @@
    (>= 4.08))
   (postgres-lwt
    (= :version))
-  lwt))
+  lwt
+  ke
+  faraday-lwt-unix))

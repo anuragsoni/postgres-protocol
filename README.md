@@ -2,19 +2,9 @@ Work-in-progress IO agnostic postgres client
 ```ocaml
 open Lwt.Syntax
 
-let connect socket user password =
+let connect host port user password =
   let user_info = Postgres.Connection.User_info.make ~user ~password () in
-  Postgres_lwt.connect
-    (fun conn ->
-      let+ _ =
-        Gluten_lwt_unix.Client.create
-          ~read_buffer_size:0x1000
-          ~protocol:(module Postgres.Connection)
-          conn
-          socket
-      in
-      ())
-    user_info
+  Postgres_lwt_unix.(connect user_info (Inet (host, port)))
 
 let prepare_query name conn =
   Postgres_lwt.prepare

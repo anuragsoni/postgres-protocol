@@ -1,13 +1,5 @@
 open Lwt.Syntax
 
-let create_socket host port =
-  let* addresses =
-    Lwt_unix.getaddrinfo host (Int.to_string port) [ Unix.(AI_FAMILY PF_INET) ]
-  in
-  let socket = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  let+ () = Lwt_unix.connect socket (List.hd addresses).ai_addr in
-  socket
-
 let make_parameters ids =
   List.to_seq ids
   |> Seq.map (fun id ->
@@ -37,27 +29,16 @@ let run name conn ids =
       | _ -> assert false)
     conn
 
-let connect socket user password =
+let connect host port user password =
   let user_info = Postgres.Connection.User_info.make ~user ~password () in
-  Postgres_lwt.connect
-    (fun conn ->
-      let+ _ =
-        Gluten_lwt_unix.Client.create
-          ~read_buffer_size:0x1000
-          ~protocol:(module Postgres.Connection)
-          conn
-          socket
-      in
-      ())
-    user_info
+  Postgres_lwt_unix.(connect user_info (Inet (host, port)))
 
 let () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level ~all:true (Some Info);
   Fmt_tty.setup_std_outputs ();
   Lwt_main.run
-    (let* socket = create_socket "localhost" 5432 in
-     let* conn = connect socket "asoni" "password" in
+    (let* conn = connect "localhost" 5432 "asoni" "password" in
      let name = "my_unique_query" in
      let* () = prepare_query name conn in
      let* () = run name conn [ 9l; 2l; 3l ]

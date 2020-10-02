@@ -4,4 +4,4 @@ type destination =
   | Unix_domain of string
   | Inet of string * int
 
-val connect : destination -> Lwt_unix.file_descr Lwt.t
+val connect : Postgres.Connection.User_info.t -> destination -> Postgres_lwt.t Lwt.t
