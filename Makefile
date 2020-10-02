@@ -1,4 +1,4 @@
-.PHONY: build clean test deps
+.PHONY: build clean test
 
 build:
 	dune build
@@ -8,6 +8,3 @@ clean:
 
 test:
 	dune runtest
-
-deps:
-	opam install angstrom faraday logs gluten-lwt-unix

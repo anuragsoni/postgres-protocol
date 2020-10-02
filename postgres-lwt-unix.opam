@@ -12,6 +12,8 @@ depends: [
   "ocaml" {>= "4.08"}
   "postgres-lwt" {= version}
   "lwt"
+  "ke"
+  "faraday-lwt-unix"
   "odoc" {with-doc}
 ]
 build: [

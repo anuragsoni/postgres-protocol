@@ -31,10 +31,13 @@ let connect_inet host port =
   in
   run addr_info
 
-let connect destination =
-  match destination with
-  | Inet (host, port) -> connect_inet host port
-  | Unix_domain p ->
-    let socket = Lwt_unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-    let+ () = Lwt_unix.connect socket (Unix.ADDR_UNIX p) in
-    socket
+let connect user_info destination =
+  let* socket =
+    match destination with
+    | Inet (host, port) -> connect_inet host port
+    | Unix_domain p ->
+      let socket = Lwt_unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+      let+ () = Lwt_unix.connect socket (Unix.ADDR_UNIX p) in
+      socket
+  in
+  Postgres_lwt.connect (Io.run socket) user_info
