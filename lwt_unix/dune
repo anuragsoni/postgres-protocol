@@ -1,0 +1,4 @@
+(library
+ (name postgres_lwt_unix)
+ (public_name postgres-lwt-unix)
+ (libraries lwt.unix postgres-lwt logs))
