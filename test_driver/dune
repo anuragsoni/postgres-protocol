@@ -3,4 +3,5 @@
  (name test_driver_lwt)
  (preprocess
   (pps ppx_jane))
- (libraries postgres logs.fmt fmt.tty postgres-lwt postgres-lwt-unix))
+ (libraries postgres logs.fmt fmt.tty postgres-lwt postgres-lwt-unix
+   mirage-crypto-rng.unix))

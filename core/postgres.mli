@@ -295,22 +295,13 @@ module Serializer : sig
     -> [> `Close of int | `Write of Faraday.bigstring Faraday.iovec list | `Yield ]
 end
 
-module Parser : sig
+module Request_ssl : sig
   type t
 
-  val create : (Backend.message -> unit) -> t
-  val next_action : t -> [> `Close | `Read ]
-
-  val feed
-    :  t
-    -> buf:Angstrom.bigstring
-    -> off:int
-    -> len:int
-    -> Angstrom.Unbuffered.more
-    -> int
-
-  val is_closed : t -> bool
-  val force_close : t -> unit
+  val create : ([ `Available | `Unavailable ] -> unit) -> t
+  val next_operation : t -> [ `Write of bytes | `Read | `Fail of string | `Stop ]
+  val report_write_result : t -> int -> unit
+  val feed_char : t -> char -> unit
 end
 
 module Connection : sig
