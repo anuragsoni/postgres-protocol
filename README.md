@@ -13,10 +13,18 @@ open Lwt.Syntax
    Postgres_lwt_unix allows for creating connections via inet or
    unix domain sockets. Once a socket connection is established, it
    returns a `Postgres_lwt.t`. All further operations should be done
-   via the functions in the `Postgres_lwt` module. *)
+   via the functions in the `Postgres_lwt` module.
+
+   Connections can either be un-encrypted (which is the default),
+   or use ssl if the postgres server was compiled with SSL support
+   enabled. *)
+let () = Mirage_crypto_rng_unix.initialize ()
+
 let connect host port user password =
+  let authenticator ~host:_ _ = Ok None in
+  let tls_config = Tls.Config.client ~authenticator () in
   let user_info = Postgres.Connection.User_info.make ~user ~password () in
-  Postgres_lwt_unix.(connect user_info (Inet (host, port)))
+  Postgres_lwt_unix.(connect ~mode:(Tls tls_config) user_info (Inet (host, port)))
 
 let prepare_query name conn =
   Postgres_lwt.prepare
