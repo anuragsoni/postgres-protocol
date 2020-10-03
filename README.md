@@ -17,7 +17,8 @@ open Lwt.Syntax
 
    Connections can either be un-encrypted (which is the default),
    or use ssl if the postgres server was compiled with SSL support
-   enabled. *)
+   enabled. Note: if setting the mode to TLS, you'd need to use
+   Inet destination instead of Unix_domain. *)
 let () = Mirage_crypto_rng_unix.initialize ()
 
 let connect host port user password =
