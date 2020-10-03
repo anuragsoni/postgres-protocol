@@ -29,9 +29,13 @@ let run name conn ids =
       | _ -> assert false)
     conn
 
+let () = Mirage_crypto_rng_unix.initialize ()
+
 let connect host port user password =
+  let authenticator ~host:_ _ = Ok None in
+  let tls_config = Tls.Config.client ~authenticator () in
   let user_info = Postgres.Connection.User_info.make ~user ~password () in
-  Postgres_lwt_unix.(connect user_info (Inet (host, port)))
+  Postgres_lwt_unix.(connect ~mode:(Tls tls_config) user_info (Inet (host, port)))
 
 let () =
   Logs.set_reporter (Logs_fmt.reporter ());

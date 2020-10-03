@@ -648,8 +648,8 @@ module Parser = struct
     ; mutable closed : bool
     }
 
-  let create handler =
-    let parser = Angstrom.(skip_many (Backend.parse <* commit >>| handler)) in
+  let create parser handler =
+    let parser = Angstrom.(skip_many (parser <* commit >>| handler)) in
     { parser; parse_state = U.Done (0, ()); closed = false }
 
   let next_action t =
@@ -683,6 +683,48 @@ module Parser = struct
 
   let is_closed t = t.closed
   let force_close t = t.closed <- true
+end
+
+module Request_ssl = struct
+  let to_response = function
+    | 'S' -> `Available
+    | _ -> `Unavailable
+
+  let payload =
+    let b = Bytes.create 8 in
+    Bytes.set_int32_be b 0 8l;
+    Bytes.set_int16_be b 4 1234;
+    Bytes.set_int16_be b 6 5679;
+    b
+
+  type state =
+    | Write
+    | Read
+    | Fail of string
+    | Closed
+
+  type t =
+    { mutable state : state
+    ; on_finish : [ `Available | `Unavailable ] -> unit
+    }
+
+  let create on_finish = { state = Write; on_finish }
+
+  let next_operation t =
+    match t.state with
+    | Write -> `Write payload
+    | Read -> `Read
+    | Fail msg -> `Fail msg
+    | Closed -> `Stop
+
+  let report_write_result t = function
+    | 8 -> t.state <- Read
+    | _ -> t.state <- Fail "Could not write the ssl request payload successfully."
+
+  let feed_char t c =
+    let resp = to_response c in
+    t.state <- Closed;
+    t.on_finish resp
 end
 
 module Connection = struct
@@ -825,7 +867,7 @@ module Connection = struct
         { user_info
         ; on_error
         ; backend_key_data = None
-        ; reader = Parser.create handle_message
+        ; reader = Parser.create Backend.parse handle_message
         ; writer = Serializer.create ()
         ; state = Connect
         ; ready_for_query = finish

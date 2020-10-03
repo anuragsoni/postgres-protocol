@@ -47,7 +47,7 @@ Incomplete TODO list:
 * add functions that'll clean up by closing connections after finishing a task
 * support binary format for parameters
 * Support additional auth methods (only MD5 and cleartext is implemented at the moment)
-* Support SSL/TLS connections
+* ~~Support SSL/TLS connections~~ (we only support ocaml-tls at the moment)
 * Add parser/serializer for all postgres backend/frontend messages
 * add wrapper to handle parameters in an easier manner
 * documentation

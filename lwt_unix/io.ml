@@ -28,7 +28,6 @@
   ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   ----------------------------------------------------------------------------*)
 
-
 open Lwt.Syntax
 
 let src = Logs.Src.create "postgres.lwt.io"
@@ -76,32 +75,68 @@ end = struct
     Lwt.return n
 end
 
-let close_if_open socket =
-  if Lwt_unix.state socket <> Lwt_unix.Closed
-  then
+module Socket = struct
+  type t =
+    | Regular of Lwt_unix.file_descr
+    | Tls of Tls_lwt.Unix.t
+
+  let close_lwt_socket_if_open socket =
+    if Lwt_unix.state socket <> Lwt_unix.Closed
+    then
+      Lwt.catch
+        (fun () -> Lwt_unix.close socket)
+        (fun exn ->
+          Log.warn (fun m -> m "Error while closing socket: %s" (Printexc.to_string exn));
+          Lwt.return_unit)
+    else Lwt.return_unit
+
+  let close_if_open = function
+    | Regular socket -> close_lwt_socket_if_open socket
+    | Tls socket -> Tls_lwt.Unix.close socket
+
+  let read socket buffer =
+    let read_bytes =
+      match socket with
+      | Regular socket -> Lwt_bytes.read socket
+      | Tls socket -> Tls_lwt.Unix.read_bytes socket
+    in
     Lwt.catch
-      (fun () -> Lwt_unix.close socket)
+      (fun () ->
+        let+ count = Buffer.write buffer (fun buf ~off ~len -> read_bytes buf off len) in
+        if count = 0 then `Eof else `Ok count)
       (fun exn ->
-        Log.warn (fun m -> m "Error while closing socket: %s" (Printexc.to_string exn));
-        Lwt.return_unit)
-  else Lwt.return_unit
+        Lwt.async (fun () -> close_if_open socket);
+        Lwt.fail exn)
 
-let shutdown_if_open socket =
-  if Lwt_unix.state socket <> Lwt_unix.Closed
-  then (
-    try Lwt_unix.shutdown socket Lwt_unix.SHUTDOWN_RECEIVE with
-    | Unix.Unix_error (Unix.ENOTCONN, _, _) -> ())
+  let writev socket iovecs =
+    match socket with
+    | Regular socket -> Faraday_lwt_unix.writev_of_fd socket iovecs
+    | Tls socket ->
+      Lwt.catch
+        (fun () ->
+          let iovecs =
+            List.map
+              (fun { Faraday.buffer; off; len } -> Cstruct.of_bigarray buffer ~off ~len)
+              iovecs
+          in
+          let+ () = Tls_lwt.Unix.writev socket iovecs in
+          `Ok (Cstruct.lenv iovecs))
+        (fun exn ->
+          Log.err (fun m ->
+              m "Error while writing to tls socket, %s" (Printexc.to_string exn));
+          match exn with
+          | Unix.Unix_error (Unix.EBADF, "check_descriptor", _) -> Lwt.return `Closed
+          | _ -> Lwt.fail exn)
 
-let read socket buffer =
-  Lwt.catch
-    (fun () ->
-      let+ count =
-        Buffer.write buffer (fun buf ~off ~len -> Lwt_bytes.read socket buf off len)
-      in
-      if count = 0 then `Eof else `Ok count)
-    (fun exn ->
-      Lwt.async (fun () -> close_if_open socket);
-      Lwt.fail exn)
+  let shutdown_if_open socket =
+    match socket with
+    | Regular socket ->
+      if Lwt_unix.state socket <> Lwt_unix.Closed
+      then (
+        try Lwt_unix.shutdown socket Lwt_unix.SHUTDOWN_RECEIVE with
+        | Unix.Unix_error (Unix.ENOTCONN, _, _) -> ())
+    | Tls _ -> ()
+end
 
 open Postgres
 
@@ -112,7 +147,7 @@ let run socket conn =
     let rec aux () =
       match Connection.next_read_operation conn with
       | `Read ->
-        let* res = read socket read_buffer in
+        let* res = Socket.read socket read_buffer in
         (match res with
         | `Eof ->
           ignore
@@ -126,7 +161,7 @@ let run socket conn =
           aux ())
       | `Close ->
         Lwt.wakeup_later notify_read_loop_finish ();
-        shutdown_if_open socket;
+        Socket.shutdown_if_open socket;
         Lwt.return_unit
     in
     Lwt.async (fun () ->
@@ -134,7 +169,7 @@ let run socket conn =
             Connection.report_exn conn exn;
             Lwt.return_unit))
   in
-  let writev = Faraday_lwt_unix.writev_of_fd socket in
+  let writev = Socket.writev socket in
   let write_loop_finish, notify_write_loop_finish = Lwt.wait () in
   let rec write_loop () =
     let rec aux () =
@@ -159,4 +194,4 @@ let run socket conn =
   write_loop ();
   Lwt.async (fun () ->
       let* () = Lwt.join [ read_loop_finish; write_loop_finish ] in
-      close_if_open socket)
+      Socket.close_if_open socket)

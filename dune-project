@@ -51,4 +51,5 @@
   (postgres-lwt
    (= :version))
   lwt
-  faraday-lwt-unix))
+  faraday-lwt-unix
+  tls))

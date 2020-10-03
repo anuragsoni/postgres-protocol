@@ -13,6 +13,7 @@ depends: [
   "postgres-lwt" {= version}
   "lwt"
   "faraday-lwt-unix"
+  "tls"
   "odoc" {with-doc}
 ]
 build: [
