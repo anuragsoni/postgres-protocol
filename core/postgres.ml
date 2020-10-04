@@ -301,50 +301,8 @@ module Frontend = struct
       Faraday.BE.write_uint32 f count
   end
 
-  module Close = struct
-    let ident = Some 'C'
-
-    type t =
-      { kind : Statement_or_portal.t
-      ; name : Optional_string.t
-      }
-
-    let size { name; _ } = 1 + Optional_string.length name + 1
-
-    let write f { kind; name } =
-      Faraday.write_char f (Statement_or_portal.to_char kind);
-      write_cstr f (Optional_string.to_string name)
-  end
-
-  module Describe = struct
-    let ident = Some 'D'
-
-    type t =
-      { kind : Statement_or_portal.t
-      ; name : Optional_string.t
-      }
-
-    let size { name; _ } = 1 + Optional_string.length name + 1
-
-    let write f { kind; name } =
-      Faraday.write_char f (Statement_or_portal.to_char kind);
-      write_cstr f (Optional_string.to_string name)
-  end
-
-  module Copy_fail = struct
-    let ident = Some 'f'
-
-    type t = string
-
-    let of_string t = t
-    let size t = String.length t + 1
-    let write f t = write_cstr f t
-  end
-
-  let flush = 'H'
   let sync = 'S'
   let terminate = 'X'
-  let copy_done = 'c'
 end
 
 module Backend = struct
@@ -624,13 +582,8 @@ module Serializer = struct
   let parse t msg = write (module Frontend.Parse) msg t
   let bind t msg = write (module Frontend.Bind) msg t
   let execute t msg = write (module Frontend.Execute) msg t
-  let close t msg = write (module Frontend.Close) msg t
-  let describe t msg = write (module Frontend.Describe) msg t
-  let copy_fail t msg = write (module Frontend.Copy_fail) msg t
-  let flush t = write_ident_only Frontend.flush t
   let sync t = write_ident_only Frontend.sync t
   let terminate t = write_ident_only Frontend.terminate t
-  let copy_done t = write_ident_only Frontend.copy_done t
 
   let next_operation t =
     match Faraday.operation t.writer with

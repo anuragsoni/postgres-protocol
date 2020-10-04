@@ -149,26 +149,6 @@ module Frontend : sig
       -> unit
       -> t
   end
-
-  module Close : sig
-    type t =
-      { kind : Types.Statement_or_portal.t
-      ; name : Types.Optional_string.t
-      }
-  end
-
-  module Describe : sig
-    type t =
-      { kind : Types.Statement_or_portal.t
-      ; name : Types.Optional_string.t
-      }
-  end
-
-  module Copy_fail : sig
-    type t
-
-    val of_string : string -> t
-  end
 end
 
 module Backend : sig
@@ -265,34 +245,6 @@ module Backend : sig
     | UnknownMessage of char
 
   val parse : message Angstrom.t
-end
-
-module Serializer : sig
-  type t
-
-  val create : ?size:int -> unit -> t
-  val yield_writer : t -> (unit -> unit) -> unit
-  val wakeup_writer : t -> unit
-  val is_closed : t -> bool
-  val drain : t -> int
-  val close_and_drain : t -> unit
-  val report_write_result : t -> [< `Closed | `Ok of int ] -> unit
-  val startup : t -> Frontend.Startup_message.t -> unit
-  val password : t -> Frontend.Password_message.t -> unit
-  val parse : t -> Frontend.Parse.t -> unit
-  val bind : t -> Frontend.Bind.t -> unit
-  val execute : t -> Frontend.Execute.t -> unit
-  val close : t -> Frontend.Close.t -> unit
-  val describe : t -> Frontend.Describe.t -> unit
-  val copy_fail : t -> Frontend.Copy_fail.t -> unit
-  val flush : t -> unit
-  val sync : t -> unit
-  val terminate : t -> unit
-  val copy_done : t -> unit
-
-  val next_operation
-    :  t
-    -> [> `Close of int | `Write of Faraday.bigstring Faraday.iovec list | `Yield ]
 end
 
 module Request_ssl : sig
