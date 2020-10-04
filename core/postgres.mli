@@ -28,59 +28,7 @@
 
 val src : Logs.src
 
-module Types : sig
-  module Process_id : sig
-    type t
-
-    val to_int32 : t -> int32
-    val of_int32 : int32 -> t option
-    val of_int32_exn : int32 -> t
-  end
-
-  module Statement_or_portal : sig
-    type t =
-      | Statement
-      | Portal
-
-    val to_char : t -> char
-    val of_char : char -> t
-  end
-
-  module Positive_int32 : sig
-    type t
-
-    val of_int32_exn : int32 -> t
-    val to_int32 : t -> int32
-  end
-
-  module Optional_string : sig
-    type t
-
-    val empty : t
-    val of_string : string -> t
-    val to_string : t -> string
-    val is_empty : t -> bool
-    val length : t -> int
-  end
-
-  module Oid : sig
-    type t
-
-    val of_int32 : int32 -> t
-    val of_int_exn : int -> t
-    val to_int32 : t -> int32
-  end
-
-  module Format_code : sig
-    type t =
-      [ `Binary
-      | `Text
-      ]
-
-    val of_int : int -> [> `Binary | `Text ] option
-    val to_int : [< `Binary | `Text ] -> int
-  end
-end
+module Types = Types
 
 module Auth : sig
   module Md5 : sig
