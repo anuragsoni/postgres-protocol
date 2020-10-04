@@ -36,89 +36,7 @@ let write_cstr f s =
 
 let parse_cstr = Angstrom.(take_while (fun c -> c <> '\x00') <* char '\x00')
 
-module Types = struct
-  module Process_id = struct
-    type t = Int32.t
-
-    let to_int32 t = t
-    let of_int32 t = if t < 1l then None else Some t
-
-    let of_int32_exn t =
-      match of_int32 t with
-      | None ->
-        raise
-        @@ Invalid_argument
-             (Printf.sprintf "Process id needs to be a positive integer. Received: %ld" t)
-      | Some v -> v
-  end
-
-  module Statement_or_portal = struct
-    type t =
-      | Statement
-      | Portal
-
-    let to_char = function
-      | Statement -> 'S'
-      | Portal -> 'P'
-
-    let of_char = function
-      | 'S' -> Statement
-      | 'P' -> Portal
-      | c ->
-        raise
-        @@ Invalid_argument
-             (Printf.sprintf "Expected Statement('S') or Portal('P') but received '%c'" c)
-  end
-
-  module Positive_int32 = struct
-    type t = Int32.t
-
-    let of_int32_exn t =
-      if t > 0l
-      then t
-      else
-        raise
-        @@ Invalid_argument
-             (Printf.sprintf "Expected positive integer, but received %ld instead" t)
-
-    let to_int32 t = t
-  end
-
-  module Optional_string = struct
-    type t = string
-
-    let empty = ""
-    let of_string = Fun.id
-    let to_string = Fun.id
-    let is_empty t = t = ""
-    let length = String.length
-  end
-
-  module Oid = struct
-    type t = Int32.t
-
-    let of_int32 = Fun.id
-    let of_int_exn = Int32.of_int
-    let to_int32 = Fun.id
-  end
-
-  module Format_code = struct
-    type t =
-      [ `Text
-      | `Binary
-      ]
-
-    let of_int = function
-      | 0 -> Some `Text
-      | 1 -> Some `Binary
-      | _ -> None
-
-    let to_int = function
-      | `Text -> 0
-      | `Binary -> 1
-  end
-end
-
+module Types = Types
 open Types
 
 module Auth = struct
@@ -292,7 +210,7 @@ module Frontend = struct
     let size { name; _ } = Optional_string.length name + 1 + 4
 
     let write f { name; max_rows } =
-      write_cstr f name;
+      write_cstr f (Optional_string.to_string name);
       let count =
         match max_rows with
         | `Unlimited -> 0l
@@ -301,50 +219,8 @@ module Frontend = struct
       Faraday.BE.write_uint32 f count
   end
 
-  module Close = struct
-    let ident = Some 'C'
-
-    type t =
-      { kind : Statement_or_portal.t
-      ; name : Optional_string.t
-      }
-
-    let size { name; _ } = 1 + Optional_string.length name + 1
-
-    let write f { kind; name } =
-      Faraday.write_char f (Statement_or_portal.to_char kind);
-      write_cstr f (Optional_string.to_string name)
-  end
-
-  module Describe = struct
-    let ident = Some 'D'
-
-    type t =
-      { kind : Statement_or_portal.t
-      ; name : Optional_string.t
-      }
-
-    let size { name; _ } = 1 + Optional_string.length name + 1
-
-    let write f { kind; name } =
-      Faraday.write_char f (Statement_or_portal.to_char kind);
-      write_cstr f (Optional_string.to_string name)
-  end
-
-  module Copy_fail = struct
-    let ident = Some 'f'
-
-    type t = string
-
-    let of_string t = t
-    let size t = String.length t + 1
-    let write f t = write_cstr f t
-  end
-
-  let flush = 'H'
   let sync = 'S'
   let terminate = 'X'
-  let copy_done = 'c'
 end
 
 module Backend = struct
@@ -624,13 +500,8 @@ module Serializer = struct
   let parse t msg = write (module Frontend.Parse) msg t
   let bind t msg = write (module Frontend.Bind) msg t
   let execute t msg = write (module Frontend.Execute) msg t
-  let close t msg = write (module Frontend.Close) msg t
-  let describe t msg = write (module Frontend.Describe) msg t
-  let copy_fail t msg = write (module Frontend.Copy_fail) msg t
-  let flush t = write_ident_only Frontend.flush t
   let sync t = write_ident_only Frontend.sync t
   let terminate t = write_ident_only Frontend.terminate t
-  let copy_done t = write_ident_only Frontend.copy_done t
 
   let next_operation t =
     match Faraday.operation t.writer with
@@ -821,7 +692,10 @@ module Connection = struct
       Log.debug (fun m ->
           m "ParameterStatus: (%S, %S)" s.Backend.Parameter_status.name s.value)
     | NoticeResponse msg ->
-      Log.warn (fun m -> m "PostgresWarning: %S" msg.Backend.Notice_response.message)
+      Log.warn (fun m ->
+          m
+            "PostgresWarning: %S"
+            (msg.Backend.Notice_response.message |> Optional_string.to_string))
     | ReadyForQuery _ ->
       t.ready_for_query ();
       t.ready_for_query <- (fun () -> ())
@@ -850,7 +724,8 @@ module Connection = struct
   let handle_message' t msg =
     match msg with
     | Backend.ErrorResponse e ->
-      Log.err (fun m -> m "Error: %S" e.Backend.Error_response.message);
+      Log.err (fun m ->
+          m "Error: %S" (e.Backend.Error_response.message |> Optional_string.to_string));
       t.on_error (`Postgres_error e)
     | _ ->
       (match t.state with
@@ -882,18 +757,13 @@ module Connection = struct
     Serializer.wakeup_writer t.writer;
     t
 
-  let prepare
-      conn
-      ~statement
-      ?(name = Optional_string.empty)
-      ?(oids = [||])
-      on_error
-      finish
-    =
+  let prepare conn ~statement ?(name = "") ?(oids = [||]) on_error finish =
     conn.on_error <- on_error;
     conn.ready_for_query <- finish;
     conn.state <- Parse;
-    let prepare = { Frontend.Parse.name; statement; oids } in
+    let prepare =
+      { Frontend.Parse.name = Optional_string.of_string name; statement; oids }
+    in
     Serializer.parse conn.writer prepare;
     Serializer.sync conn.writer;
     Serializer.wakeup_writer conn.writer

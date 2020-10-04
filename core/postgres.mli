@@ -28,59 +28,7 @@
 
 val src : Logs.src
 
-module Types : sig
-  module Process_id : sig
-    type t
-
-    val to_int32 : t -> int32
-    val of_int32 : int32 -> t option
-    val of_int32_exn : int32 -> t
-  end
-
-  module Statement_or_portal : sig
-    type t =
-      | Statement
-      | Portal
-
-    val to_char : t -> char
-    val of_char : char -> t
-  end
-
-  module Positive_int32 : sig
-    type t
-
-    val of_int32_exn : int32 -> t
-    val to_int32 : t -> int32
-  end
-
-  module Optional_string : sig
-    type t
-
-    val empty : t
-    val of_string : string -> t
-    val to_string : t -> string
-    val is_empty : t -> bool
-    val length : t -> int
-  end
-
-  module Oid : sig
-    type t
-
-    val of_int32 : int32 -> t
-    val of_int_exn : int -> t
-    val to_int32 : t -> int32
-  end
-
-  module Format_code : sig
-    type t =
-      [ `Binary
-      | `Text
-      ]
-
-    val of_int : int -> [> `Binary | `Text ] option
-    val to_int : [< `Binary | `Text ] -> int
-  end
-end
+module Types = Types
 
 module Auth : sig
   module Md5 : sig
@@ -148,26 +96,6 @@ module Frontend : sig
       -> [ `Count of Types.Positive_int32.t | `Unlimited ]
       -> unit
       -> t
-  end
-
-  module Close : sig
-    type t =
-      { kind : Types.Statement_or_portal.t
-      ; name : Types.Optional_string.t
-      }
-  end
-
-  module Describe : sig
-    type t =
-      { kind : Types.Statement_or_portal.t
-      ; name : Types.Optional_string.t
-      }
-  end
-
-  module Copy_fail : sig
-    type t
-
-    val of_string : string -> t
   end
 end
 
@@ -265,34 +193,6 @@ module Backend : sig
     | UnknownMessage of char
 
   val parse : message Angstrom.t
-end
-
-module Serializer : sig
-  type t
-
-  val create : ?size:int -> unit -> t
-  val yield_writer : t -> (unit -> unit) -> unit
-  val wakeup_writer : t -> unit
-  val is_closed : t -> bool
-  val drain : t -> int
-  val close_and_drain : t -> unit
-  val report_write_result : t -> [< `Closed | `Ok of int ] -> unit
-  val startup : t -> Frontend.Startup_message.t -> unit
-  val password : t -> Frontend.Password_message.t -> unit
-  val parse : t -> Frontend.Parse.t -> unit
-  val bind : t -> Frontend.Bind.t -> unit
-  val execute : t -> Frontend.Execute.t -> unit
-  val close : t -> Frontend.Close.t -> unit
-  val describe : t -> Frontend.Describe.t -> unit
-  val copy_fail : t -> Frontend.Copy_fail.t -> unit
-  val flush : t -> unit
-  val sync : t -> unit
-  val terminate : t -> unit
-  val copy_done : t -> unit
-
-  val next_operation
-    :  t
-    -> [> `Close of int | `Write of Faraday.bigstring Faraday.iovec list | `Yield ]
 end
 
 module Request_ssl : sig
