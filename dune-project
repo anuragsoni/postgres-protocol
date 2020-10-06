@@ -27,8 +27,7 @@
   (faraday
    (>= 0.7.2))
   logs
-  (alcotest :with-test)
-  (qcheck-alcotest :with-test)))
+  (ounit2 :with-test)))
 
 (package
  (name postgres-lwt)

@@ -30,12 +30,6 @@ val src : Logs.src
 
 module Types = Types
 
-module Auth : sig
-  module Md5 : sig
-    val hash : username:string -> password:string -> salt:string -> string
-  end
-end
-
 type protocol_version = V3_0
 
 module Frontend : sig

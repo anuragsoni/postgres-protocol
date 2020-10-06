@@ -1,0 +1,35 @@
+name: Test
+on:
+  pull_request:
+    branches:
+      - main
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ matrix.operating-system }}
+    strategy:
+      fail-fast: false
+      matrix:
+        operating-system: [ ubuntu-latest ]
+        ocaml-version: [ '4.11.1' ]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup cache
+        uses: actions/cache@v2
+        id: opam-deps-cache
+        with:
+          path: ~/.opam
+          key: ${{ runner.os }}-${{ matrix.ocaml-version }}-${{ hashFiles('*.opam') }}-1
+      - name: OCaml ${{ matrix.ocaml-version }}
+        uses: avsm/setup-ocaml@v1
+        with:
+          ocaml-version: ${{ matrix.ocaml-version }}
+      - name: Install deps
+        if: steps.opam-deps-cache.cache-hit != 'true'
+        run: |
+          opam pin add postgres.dev -n .
+          opam pin add postgres-lwt.dev -n .
+          opam pin add postgres-lwt-unix.dev -n  .
+          opam install -t . --deps-only
+      - name: Run Test
+        run: opam exec -- dune runtest
