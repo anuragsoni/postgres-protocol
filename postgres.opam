@@ -13,7 +13,8 @@ depends: [
   "angstrom" {>= "0.14.1"}
   "faraday" {>= "0.7.2"}
   "logs"
-  "ounit2" {with-test}
+  "fmt" {with-test}
+  "alcotest" {with-test}
   "odoc" {with-doc}
 ]
 build: [

@@ -4,37 +4,39 @@ let default_error_handler _ = failwith "BOOM"
 
 module Util = struct
   let write_op_to_list = function
-    | `Close _ -> [ "CLOSE" ]
-    | `Yield -> [ "YIELD" ]
+    | `Close _ -> [ "CLOSE" |> Bytes.of_string ]
+    | `Yield -> [ "YIELD" |> Bytes.of_string ]
     | `Write iovecs ->
       List.map
         (fun { Faraday.buffer; off; len } ->
           let b = Bigstringaf.sub buffer ~off ~len in
-          Bigstringaf.to_string b)
+          Bigstringaf.to_string b |> Bytes.of_string)
         iovecs
 
-  let diff_string_pair fmt (l, r) = Format.fprintf fmt "Expected: %S, received: %S" l r
+  let pp_string_list fmt (l, r) =
+    let p = Fmt.Dump.list Fmt.Dump.string in
+    Format.fprintf fmt "Expected: %a Received: %a\n" p l p r
 end
 
-let test_startup_payload _ctxt =
+let test_startup_payload () =
   let user_info = Connection.User_info.make ~user:"test" ~password:"password" () in
   let conn = Connection.connect user_info default_error_handler (fun () -> ()) in
   let next_write_op = Connection.next_write_operation conn in
-  OUnit2.assert_equal
-    ~pp_diff:Util.diff_string_pair
-    "\000\000\000\019\000\003\000\000user\000test\000\000"
-    (Util.write_op_to_list next_write_op |> String.concat "\n");
+  Alcotest.(check (list bytes))
+    "Can encode startup payload"
+    [ "\000\000\000\019\000\003\000\000user\000test\000\000" |> Bytes.of_string ]
+    (Util.write_op_to_list next_write_op);
   let user_info =
     Connection.User_info.make ~user:"test" ~password:"password" ~database:"mydatabase" ()
   in
   let conn = Connection.connect user_info default_error_handler (fun () -> ()) in
   let next_write_op = Connection.next_write_operation conn in
-  OUnit2.assert_equal
-    ~pp_diff:Util.diff_string_pair
-    "\000\000\000'\000\003\000\000user\000test\000database\000mydatabase\000\000"
-    (Util.write_op_to_list next_write_op |> String.concat "\n")
+  Alcotest.(check (list bytes))
+    "Encode message with database name"
+    [ "\000\000\000'\000\003\000\000user\000test\000database\000mydatabase\000\000"
+      |> Bytes.of_string
+    ]
+    (Util.write_op_to_list next_write_op)
 
-open OUnit2
-
-let suite = "Postgres" >::: [ "test_startup_payload" >:: test_startup_payload ]
-let () = run_test_tt_main suite
+let tests = [ "encode startup message", `Quick, test_startup_payload ]
+let () = Alcotest.run "Postgres" [ "Protocol tests", tests ]
