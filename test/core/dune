@@ -1,3 +1,4 @@
 (tests
-  (names test_postgres)
-  (libraries postgres ounit2 fmt))
+ (names test_postgres)
+ (package postgres)
+ (libraries postgres alcotest fmt))
