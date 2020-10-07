@@ -72,7 +72,7 @@ let test_md5_auth () =
   let message = [ "R\000\000\000\012\000\000\000\005gnqu" ] in
   Util.read_frames message conn;
   Alcotest.(check (list Util.string))
-    "Receive md5 password"
+    "Prepare md5 password payload"
     [ "p\000\000\000(md5290d3a28e45d0e2a0cb83cce2adb41e3\000" ]
     (Util.write_op_to_list (Connection.next_write_operation conn));
   let res = Util.write_all conn in
@@ -82,9 +82,31 @@ let test_md5_auth () =
   Util.read_frames messages conn;
   Alcotest.(check bool) "Login successful" true !auth_ok
 
+let test_plain_auth () =
+  let user_info = Connection.User_info.make ~user:"test" ~password:"password" () in
+  let auth_ok = ref false in
+  let conn =
+    Connection.connect user_info default_error_handler (fun () -> auth_ok := true)
+  in
+  let res = Util.write_all conn in
+  Connection.report_write_result conn res;
+  let message = [ "R\000\000\000\008\000\000\000\003" ] in
+  Util.read_frames message conn;
+  Alcotest.(check (list Util.string))
+    "Prepare plain text password payload"
+    [ "p\000\000\000\rpassword\000" ]
+    (Util.write_op_to_list (Connection.next_write_operation conn));
+  let res = Util.write_all conn in
+  Connection.report_write_result conn res;
+  Alcotest.(check bool) "Log-in hasn't happened yet" false !auth_ok;
+  let messages = [ "R\000\000\000\008\000\000\000\000"; Util.ready_for_query ] in
+  Util.read_frames messages conn;
+  Alcotest.(check bool) "Login successful" true !auth_ok
+
 let tests =
-  [ "encode startup message", `Quick, test_startup_payload
-  ; "test_md5_auth", `Quick, test_md5_auth
+  [ "startup", [ "encode startup message", `Quick, test_startup_payload ]
+  ; ( "auth"
+    , [ "md5 auth", `Quick, test_md5_auth; "plain text auth", `Quick, test_plain_auth ] )
   ]
 
-let () = Alcotest.run "Postgres" [ "Protocol tests", tests ]
+let () = Alcotest.run "Postgres" tests
