@@ -143,7 +143,7 @@ open Postgres
 let run socket conn =
   let read_buffer = Buffer.create 0x1000 in
   let read_loop_finish, notify_read_loop_finish = Lwt.wait () in
-  let read_loop () =
+  let rec read_loop () =
     let rec aux () =
       match Connection.next_read_operation conn with
       | `Read ->
@@ -159,6 +159,9 @@ let run socket conn =
             (Buffer.read read_buffer (fun buf ~off ~len ->
                  Connection.read conn buf ~off ~len));
           aux ())
+      | `Yield ->
+        Connection.yield_reader conn read_loop;
+        Lwt.return_unit
       | `Close ->
         Lwt.wakeup_later notify_read_loop_finish ();
         Socket.shutdown_if_open socket;

@@ -46,6 +46,8 @@ let () =
      let name = "my_unique_query" in
      let* () = prepare_query name conn in
      let* () = run name conn [ 9l; 2l; 3l ]
-     and* () = run name conn [ 2l; 4l; 10l ] in
+     and* () = run name conn [ 2l; 4l; 10l ]
+     and* () = run name conn [ 1l; 7l; 5l ]
+     and* () = run name conn [ 78l; 11l; 6l ] in
      let+ () = Postgres_lwt.close conn in
      Logs.info (fun m -> m "Finished"))
