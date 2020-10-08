@@ -624,40 +624,98 @@ module Connection = struct
     | Parse
     | Execute
 
-  type t =
+  type conn =
     { user_info : User_info.t
     ; backend_key_data : Backend.Backend_key_data.t option
     ; reader : Parser.t
     ; writer : Serializer.t
+    ; mutable wakeup_reader : (unit -> unit) option
     ; mutable on_error : error_handler
     ; mutable state : mode
     ; mutable ready_for_query : unit -> unit
     ; mutable on_data_row : string option list -> unit
+    ; mutable running_operation : bool
     }
 
-  let next_write_operation t = Serializer.next_operation t.writer
-  let next_read_operation t = Parser.next_action t.reader
+  module Sequencer = struct
+    type t =
+      { conn : conn
+      ; queue : (conn -> unit) Queue.t
+      }
+
+    let conn t = t.conn
+    let create conn = { conn; queue = Queue.create () }
+
+    let enqueue t task =
+      Log.debug (fun m -> m "sequencer enqueue");
+      Queue.push task t.queue
+
+    let is_empty t = Queue.is_empty t.queue
+
+    let advance_if_needed t =
+      match Queue.peek_opt t.queue with
+      | None ->
+        Log.debug (fun m -> m "no advance");
+        ()
+      | Some _ ->
+        Log.debug (fun m -> m "advance");
+        if t.conn.running_operation
+        then ()
+        else (
+          let op = Queue.take t.queue in
+          t.conn.running_operation <- true;
+          op t.conn)
+  end
+
+  type t = Sequencer.t
+
+  let is_closed t =
+    let conn = Sequencer.conn t in
+    Parser.is_closed conn.reader && Serializer.is_closed conn.writer
+
+  let next_write_operation t =
+    Sequencer.advance_if_needed t;
+    Serializer.next_operation (Sequencer.conn t).writer
+
+  let next_read_operation t =
+    Sequencer.advance_if_needed t;
+    if Sequencer.is_empty t && (Sequencer.conn t).running_operation = false
+    then `Yield
+    else Parser.next_action (Sequencer.conn t).reader
 
   let read t buf ~off ~len =
-    Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Incomplete
+    Parser.feed (Sequencer.conn t).reader ~buf ~off ~len Angstrom.Unbuffered.Incomplete
 
   let read_eof t buf ~off ~len =
-    Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Complete
+    Parser.feed (Sequencer.conn t).reader ~buf ~off ~len Angstrom.Unbuffered.Complete
 
-  let yield_reader _t thunk = thunk ()
-  let yield_writer t thunk = Serializer.yield_writer t.writer thunk
-  let report_write_result t res = Serializer.report_write_result t.writer res
+  let yield_reader t thunk =
+    if is_closed t
+    then failwith "Connection is closed"
+    else if Option.is_some (Sequencer.conn t).wakeup_reader
+    then failwith "Only one callback can be registered at a time"
+    else (Sequencer.conn t).wakeup_reader <- Some thunk
 
-  let shutdown t =
+  let wakeup_reader t =
+    let conn = Sequencer.conn t in
+    let thunk = conn.wakeup_reader in
+    conn.wakeup_reader <- None;
+    Option.iter (fun t -> t ()) thunk
+
+  let yield_writer t thunk = Serializer.yield_writer (Sequencer.conn t).writer thunk
+
+  let report_write_result t res =
+    Serializer.report_write_result (Sequencer.conn t).writer res
+
+  let shutdown conn =
+    let t = Sequencer.conn conn in
     Parser.force_close t.reader;
     Serializer.close_and_drain t.writer;
     Serializer.wakeup_writer t.writer
 
-  let is_closed t = Parser.is_closed t.reader && Serializer.is_closed t.writer
-
   let report_exn t exn =
     shutdown t;
-    t.on_error (`Exn exn)
+    (Sequencer.conn t).on_error (`Exn exn)
 
   let handle_auth_message t msg =
     let r msg = raise @@ Auth_method_not_implemented msg in
@@ -698,6 +756,7 @@ module Connection = struct
             (msg.Backend.Notice_response.message |> Optional_string.to_string))
     | ReadyForQuery _ ->
       t.ready_for_query ();
+      t.running_operation <- false;
       t.ready_for_query <- (fun () -> ())
     | _ ->
       (* Ignore other messages during startup *)
@@ -708,6 +767,7 @@ module Connection = struct
     | Backend.ParseComplete -> ()
     | ReadyForQuery _ ->
       t.ready_for_query ();
+      t.running_operation <- false;
       t.ready_for_query <- (fun () -> ())
     | _ -> ()
 
@@ -716,6 +776,7 @@ module Connection = struct
     | Backend.BindComplete -> ()
     | ReadyForQuery _ ->
       t.ready_for_query ();
+      t.running_operation <- false;
       t.ready_for_query <- (fun () -> ());
       t.on_data_row <- (fun _ -> ())
     | DataRow row -> t.on_data_row row
@@ -747,17 +808,27 @@ module Connection = struct
         ; state = Connect
         ; ready_for_query = finish
         ; on_data_row = (fun _ -> ())
+        ; wakeup_reader = None
+        ; running_operation = false
         }
     in
-    let t = Lazy.force t in
+    let t' = Lazy.force t in
+    let conn = Sequencer.create t' in
+    (Sequencer.enqueue conn
+    @@ fun t ->
+    Log.debug (fun m -> m "startup");
     let startup_message =
       Frontend.Startup_message.make ~user:user_info.user ?database:user_info.database ()
     in
     Serializer.startup t.writer startup_message;
-    Serializer.wakeup_writer t.writer;
-    t
+    Serializer.wakeup_writer t.writer);
+    wakeup_reader conn;
+    conn
 
-  let prepare conn ~statement ?(name = "") ?(oids = [||]) on_error finish =
+  let prepare t ~statement ?(name = "") ?(oids = [||]) on_error finish =
+    (Sequencer.enqueue t
+    @@ fun conn ->
+    Log.debug (fun m -> m "prepare");
     conn.on_error <- on_error;
     conn.ready_for_query <- finish;
     conn.state <- Parse;
@@ -766,10 +837,11 @@ module Connection = struct
     in
     Serializer.parse conn.writer prepare;
     Serializer.sync conn.writer;
-    Serializer.wakeup_writer conn.writer
+    Serializer.wakeup_writer conn.writer);
+    wakeup_reader t
 
   let execute
-      conn
+      t
       ?(name = "")
       ?(statement = "")
       ?(parameters = [||])
@@ -777,6 +849,8 @@ module Connection = struct
       on_data_row
       finish
     =
+    (Sequencer.enqueue t
+    @@ fun conn ->
     conn.on_error <- on_error;
     conn.ready_for_query <- finish;
     conn.state <- Execute;
@@ -786,9 +860,13 @@ module Connection = struct
     Serializer.bind conn.writer b;
     Serializer.execute conn.writer e;
     Serializer.sync conn.writer;
-    Serializer.wakeup_writer conn.writer
+    Serializer.wakeup_writer conn.writer);
+    wakeup_reader t
 
-  let close conn =
+  let close t =
+    (Sequencer.enqueue t
+    @@ fun conn ->
     Serializer.terminate conn.writer;
-    shutdown conn
+    shutdown t);
+    wakeup_reader t
 end

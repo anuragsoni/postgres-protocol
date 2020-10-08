@@ -247,7 +247,7 @@ module Connection : sig
     :  t
     -> [> `Close of int | `Write of Faraday.bigstring Faraday.iovec list | `Yield ]
 
-  val next_read_operation : t -> [> `Close | `Read ]
+  val next_read_operation : t -> [> `Close | `Read | `Yield ]
   val read : t -> Angstrom.bigstring -> off:int -> len:int -> int
   val read_eof : t -> Angstrom.bigstring -> off:int -> len:int -> int
   val yield_reader : t -> (unit -> unit) -> unit

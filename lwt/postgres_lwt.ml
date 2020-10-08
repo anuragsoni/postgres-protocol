@@ -29,14 +29,7 @@
 open Postgres
 open Lwt.Syntax
 
-module Throttle = struct
-  type 'a t = 'a * Lwt_mutex.t
-
-  let create conn = conn, Lwt_mutex.create ()
-  let enqueue (conn, mutex) run = Lwt_mutex.with_lock mutex (fun () -> run conn)
-end
-
-type t = Connection.t Throttle.t
+type t = Connection.t
 
 exception Parse_error of string
 exception Postgres_error of Backend.Error_response.t
@@ -55,12 +48,10 @@ let connect run user_info =
   let conn = Connection.connect user_info (wakeup_exn wakeup) (Lwt.wakeup_later wakeup) in
   run conn;
   let+ () = finished in
-  Throttle.create conn
+  conn
 
-let prepare ~statement ?(name = "") ?(oids = [||]) t =
+let prepare ~statement ?(name = "") ?(oids = [||]) conn =
   let finished, wakeup = Lwt.wait () in
-  Throttle.enqueue t
-  @@ fun conn ->
   Connection.prepare
     conn
     ~statement
@@ -70,10 +61,8 @@ let prepare ~statement ?(name = "") ?(oids = [||]) t =
     (Lwt.wakeup_later wakeup);
   finished
 
-let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row t =
+let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn =
   let finished, wakeup = Lwt.wait () in
-  Throttle.enqueue t
-  @@ fun conn ->
   Connection.execute
     conn
     ~name
@@ -84,8 +73,6 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row t =
     (Lwt.wakeup_later wakeup);
   finished
 
-let close t =
-  Throttle.enqueue t
-  @@ fun conn ->
+let close conn =
   Connection.close conn;
   Lwt.return_unit
