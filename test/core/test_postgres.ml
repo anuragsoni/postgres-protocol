@@ -10,12 +10,6 @@ module Util = struct
     Bytes.set b 5 'I';
     Bytes.to_string b
 
-  let read_op_to_string conn =
-    match Connection.next_read_operation conn with
-    | `Read -> "read"
-    | `Yield -> "yield"
-    | `Close -> "closed"
-
   let read_op =
     let fmt fmt t =
       let m =
@@ -37,10 +31,6 @@ module Util = struct
           let b = Bigstringaf.sub buffer ~off ~len in
           Bigstringaf.to_string b)
         iovecs
-
-  let pp_string_list fmt (l, r) =
-    let p = Fmt.Dump.list Fmt.Dump.string in
-    Format.fprintf fmt "Expected: %a Received: %a\n" p l p r
 
   let write_all conn =
     match Connection.next_write_operation conn with
