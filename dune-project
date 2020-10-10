@@ -53,3 +53,22 @@
   lwt
   faraday-lwt-unix
   tls))
+
+(package
+ (name postgres-mirage)
+ (tags
+  (postgres postgresql mirage))
+ (depends
+  dns-client
+  ipaddr
+  domain-name
+  (ocaml
+   (>= 4.08))
+  (postgres-lwt
+   (= :version))
+  mirage-stack
+  mirage-random
+  mirage-time
+  mirage-clock
+  tls
+  lwt))

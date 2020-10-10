@@ -1,0 +1,5 @@
+(library
+ (name postgres_mirage)
+ (public_name postgres-mirage)
+ (libraries domain-name dns-client.mirage ipaddr logs lwt mirage-clock
+   mirage-random mirage-stack mirage-time postgres-lwt tls-mirage))
