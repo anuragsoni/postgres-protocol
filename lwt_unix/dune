@@ -1,4 +1,4 @@
 (library
  (name postgres_lwt_unix)
  (public_name postgres-lwt-unix)
- (libraries lwt.unix postgres-lwt logs ke faraday-lwt-unix tls.lwt))
+ (libraries lwt.unix postgres-lwt logs faraday-lwt-unix tls.lwt))
