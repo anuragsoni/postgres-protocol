@@ -70,5 +70,5 @@
   mirage-random
   mirage-time
   mirage-clock
-  tls
+  tls-mirage
   lwt))

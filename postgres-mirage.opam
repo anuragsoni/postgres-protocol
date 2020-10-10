@@ -18,7 +18,7 @@ depends: [
   "mirage-random"
   "mirage-time"
   "mirage-clock"
-  "tls"
+  "tls-mirage"
   "lwt"
   "odoc" {with-doc}
 ]
