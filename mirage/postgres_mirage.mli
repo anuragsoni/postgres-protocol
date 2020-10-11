@@ -39,6 +39,7 @@ module Make
     (RANDOM : Mirage_random.S) : sig
   val create
     :  STACK.t
+    -> ?tls_config:Tls.Config.client
     -> Postgres.Connection.User_info.t
     -> destination
     -> Postgres_lwt.t Lwt.t

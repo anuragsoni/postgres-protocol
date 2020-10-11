@@ -122,6 +122,51 @@ struct
   module Dns = Dns_client_mirage.Make (RANDOM) (TIME) (MCLOCK) (STACK)
   module TLS = Tls_mirage.Make (STACK.TCPV4)
 
+  let request_tls flow =
+    let module FLOW = STACK.TCPV4 in
+    let ssl_avail, wakeup_ssl_avail = Lwt.wait () in
+    let req = Postgres.Request_ssl.create (Lwt.wakeup_later wakeup_ssl_avail) in
+    let rec loop () =
+      match Postgres.Request_ssl.next_operation req with
+      | `Write payload ->
+        FLOW.write flow (Cstruct.of_bytes payload)
+        >>= (function
+        | Ok () ->
+          Postgres.Request_ssl.report_write_result req (Bytes.length payload);
+          loop ()
+        | Error err ->
+          Log.err (fun m -> m "%a" FLOW.pp_write_error err);
+          failwith "Error while sending payload requesting ssl")
+      | `Read ->
+        FLOW.read flow
+        >>= (function
+        | Ok (`Data cs) ->
+          if Cstruct.len cs <> 1
+          then failwith "Expecting 1 character in response"
+          else Postgres.Request_ssl.feed_char req (Cstruct.get_char cs 0);
+          loop ()
+        | Ok `Eof ->
+          Log.err (fun m -> m "Received eof");
+          failwith "Unexpected eof"
+        | Error err ->
+          Log.err (fun m -> m "%a" FLOW.pp_error err);
+          failwith "Failed to setup ssl connection")
+      | `Stop -> Lwt.return_unit
+      | `Fail msg -> failwith msg
+    in
+    Lwt.async (fun () -> loop ());
+    ssl_avail
+
+  let upgrade_flow conf flow =
+    request_tls flow
+    >>= function
+    | `Available ->
+      TLS.client_of_flow conf flow
+      >>= (function
+      | Ok flow -> Lwt.return flow
+      | Error _ -> failwith "Could not setup tls flow")
+    | `Unavailable -> failwith "Could not establish tls connection"
+
   let resolve dns destination =
     let open Lwt_result.Syntax in
     match destination with
@@ -148,10 +193,18 @@ struct
 
   let create stack =
     let dns = Dns.create stack in
-    fun user_info destination ->
+    fun ?tls_config user_info destination ->
       let open Lwt.Infix in
       connect_inet (STACK.tcpv4 stack) dns destination
       >>= fun flow ->
-      let module Io = Make_io (STACK.TCPV4) in
-      Postgres_lwt.connect (fun conn -> Io.run flow conn) user_info
+      match tls_config with
+      | None ->
+        let module Io = Make_io (STACK.TCPV4) in
+        Postgres_lwt.connect (fun conn -> Io.run flow conn) user_info
+      | Some conf ->
+        upgrade_flow conf flow
+        >>= fun flow' ->
+        Log.info (fun m -> m "connecting over tls");
+        let module Io = Make_io (TLS) in
+        Postgres_lwt.connect (fun conn -> Io.run flow' conn) user_info
 end

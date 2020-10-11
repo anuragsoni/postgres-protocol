@@ -40,9 +40,11 @@ struct
       conn
 
   let connect stack user password host port =
+    let authenticator ~host:_ _ = Ok None in
+    let tls_config = Tls.Config.client ~authenticator () in
     let domain = Domain_name.of_string_exn host |> Domain_name.host_exn in
     let user_info = Postgres.Connection.User_info.make ~user ~password () in
-    PG.create stack user_info Postgres_mirage.(Domain (domain, port))
+    PG.create stack ~tls_config user_info Postgres_mirage.(Domain (domain, port))
 
   let start stack _time _random _mclock pclock =
     Logs.(set_level (Some Info));
