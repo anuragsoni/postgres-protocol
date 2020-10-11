@@ -105,8 +105,11 @@ module Socket = struct
         let+ count = Buffer.write buffer (fun buf ~off ~len -> read_bytes buf off len) in
         if count = 0 then `Eof else `Ok count)
       (fun exn ->
-        Lwt.async (fun () -> close_if_open socket);
-        Lwt.fail exn)
+        match exn with
+        | Unix.Unix_error (Unix.EBADF, _, _) -> Lwt.return `Eof
+        | _ ->
+          Lwt.async (fun () -> close_if_open socket);
+          Lwt.fail exn)
 
   let writev socket iovecs =
     match socket with

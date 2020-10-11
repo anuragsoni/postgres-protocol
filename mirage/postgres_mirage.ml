@@ -60,19 +60,22 @@ struct
             Lwt.wakeup_later notify_read_loop_finish ();
             STACK.TCPV4.close flow
           | `Read ->
-            STACK.TCPV4.read flow
-            >>= (function
-            | Ok (`Data cstruct) ->
-              let buf = Cstruct.to_bigarray cstruct in
-              ignore (Connection.read conn buf ~off:0 ~len:(Bigstringaf.length buf));
-              aux ()
-            | Ok `Eof ->
-              let buf = Bigstringaf.create 0 in
-              ignore (Connection.read_eof conn buf ~off:0 ~len:0);
-              aux ()
-            | Error err ->
-              let msg = Format.asprintf "%a" STACK.TCPV4.pp_error err in
-              Lwt.fail_with msg)
+            Lwt.catch
+              (fun () ->
+                STACK.TCPV4.read flow
+                >>= function
+                | Ok (`Data cstruct) ->
+                  let buf = Cstruct.to_bigarray cstruct in
+                  ignore (Connection.read conn buf ~off:0 ~len:(Bigstringaf.length buf));
+                  aux ()
+                | Ok `Eof ->
+                  let buf = Bigstringaf.create 0 in
+                  ignore (Connection.read_eof conn buf ~off:0 ~len:0);
+                  aux ()
+                | Error err ->
+                  let msg = Format.asprintf "%a" STACK.TCPV4.pp_error err in
+                  failwith msg)
+              (fun exn -> STACK.TCPV4.close flow >>= fun () -> raise exn)
         in
         Lwt.async (fun () ->
             Lwt.catch aux (fun exn ->
@@ -96,17 +99,17 @@ struct
                 (fun { Faraday.buffer; off; len } -> Cstruct.of_bigarray buffer ~off ~len)
                 iovecs
             in
-            writev cv
-            >>= (function
-            | Ok () ->
-              let len =
-                List.fold_left (fun acc { Faraday.len; _ } -> acc + len) 0 iovecs
-              in
-              Connection.report_write_result conn (`Ok len);
-              aux ()
-            | Error err ->
-              let msg = Format.asprintf "%a" STACK.TCPV4.pp_write_error err in
-              Lwt.fail_with msg)
+            Lwt.catch
+              (fun () ->
+                writev cv
+                >>= function
+                | Ok () ->
+                  Connection.report_write_result conn (`Ok (Cstruct.lenv cv));
+                  aux ()
+                | Error err ->
+                  let msg = Format.asprintf "%a" STACK.TCPV4.pp_write_error err in
+                  failwith msg)
+              (fun exn -> STACK.TCPV4.close flow >>= fun () -> raise exn)
         in
         Lwt.async (fun () ->
             Lwt.catch aux (fun exn ->
