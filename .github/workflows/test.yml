@@ -27,6 +27,9 @@ jobs:
           opam pin add postgres.dev -n .
           opam pin add postgres-lwt.dev -n .
           opam pin add postgres-lwt-unix.dev -n  .
+          opam pin add postgres-mirage.dev -n .
           opam install -t . --deps-only
+      - name: Check build
+        run: opam exec -- dune build @install
       - name: Run Test
         run: opam exec -- dune runtest
