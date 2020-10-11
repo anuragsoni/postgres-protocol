@@ -4,10 +4,6 @@ let src = Logs.Src.create "postgres.lwt.unix"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-type mode =
-  | Regular
-  | Tls of Tls.Config.client
-
 type destination =
   | Unix_domain of string
   | Inet of string * int
@@ -58,7 +54,7 @@ let request_ssl socket =
   Lwt.async (fun () -> loop ());
   ssl_avail
 
-let connect ?(mode = Regular) user_info destination =
+let connect ?tls_config user_info destination =
   let* socket =
     match destination with
     | Inet (host, port) -> connect_inet host port
@@ -70,9 +66,9 @@ let connect ?(mode = Regular) user_info destination =
   Lwt.catch
     (fun () ->
       let* socket =
-        match mode with
-        | Regular -> Lwt.return (Io.Socket.Regular socket)
-        | Tls config ->
+        match tls_config with
+        | None -> Lwt.return (Io.Socket.Regular socket)
+        | Some config ->
           let* avail = request_ssl socket in
           (match avail with
           | `Available ->
