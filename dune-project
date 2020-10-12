@@ -1,6 +1,6 @@
 (lang dune 2.7)
 
-(name postgres-protocol)
+(name postgres)
 
 (generate_opam_files true)
 
