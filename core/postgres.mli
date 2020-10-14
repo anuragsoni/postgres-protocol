@@ -99,6 +99,9 @@ module Backend : sig
       { length : int
       ; kind : char
       }
+
+    val pp : t Fmt.t
+    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   module Auth : sig
@@ -114,6 +117,8 @@ module Backend : sig
       | SASL of string
       | SASLContinue of string
       | SASLFinal of string
+
+    val pp : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   module Backend_key_data : sig
@@ -121,6 +126,9 @@ module Backend : sig
       { pid : Types.Process_id.t
       ; secret : Int32.t
       }
+
+    val pp : t Fmt.t
+    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   module Error_or_notice_kind : sig
@@ -151,6 +159,9 @@ module Backend : sig
       { code : Error_or_notice_kind.t
       ; message : Types.Optional_string.t
       }
+
+    val pp : t Fmt.t
+    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   module Notice_response : sig
@@ -158,6 +169,9 @@ module Backend : sig
       { code : Error_or_notice_kind.t
       ; message : Types.Optional_string.t
       }
+
+    val pp : t Fmt.t
+    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   module Parameter_status : sig
@@ -165,6 +179,9 @@ module Backend : sig
       { name : string
       ; value : string
       }
+
+    val pp : t Fmt.t
+    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   module Ready_for_query : sig
@@ -172,6 +189,8 @@ module Backend : sig
       | Idle
       | Transaction_block
       | Failed_transaction
+
+    val pp : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   type message =

@@ -27,7 +27,7 @@
   (faraday
    (>= 0.7.2))
   logs
-  (fmt :with-test)
+  fmt
   (alcotest :with-test)))
 
 (package

@@ -13,7 +13,7 @@ depends: [
   "angstrom" {>= "0.14.1"}
   "faraday" {>= "0.7.2"}
   "logs"
-  "fmt" {with-test}
+  "fmt"
   "alcotest" {with-test}
   "odoc" {with-doc}
 ]

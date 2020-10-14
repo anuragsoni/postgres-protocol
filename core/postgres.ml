@@ -232,6 +232,16 @@ module Backend = struct
       ; kind : char
       }
 
+    let pp =
+      let l = Fmt.field "length" (fun t -> t.length) Fmt.int
+      and k = Fmt.field "kind" (fun t -> t.kind) Fmt.char in
+      Fmt.record [ l; k ]
+
+    let pp_dump =
+      let l = Fmt.Dump.field "length" (fun t -> t.length) Fmt.int
+      and k = Fmt.Dump.field "kind" (fun t -> t.kind) Fmt.char in
+      Fmt.Dump.record [ l; k ]
+
     let parse =
       let parse_len =
         BE.any_int32
@@ -255,6 +265,21 @@ module Backend = struct
       | SASL of string
       | SASLContinue of string
       | SASLFinal of string
+
+    let to_string = function
+      | Ok -> "Auth_ok"
+      | KerberosV5 -> "Auth_KerberosV5"
+      | CleartextPassword -> "Auth_Cleartext"
+      | Md5Password _ -> "Auth_Md5Password"
+      | SCMCredential -> "Auth_SCMCredential"
+      | GSS -> "Auth_Gss"
+      | SSPI -> "Auth_Sspi"
+      | GSSContinue _ -> "Auth_Gss_Continue"
+      | SASL _ -> "Auth_Sasl"
+      | SASLContinue _ -> "Auth_Sasl_Continue"
+      | SASLFinal _ -> "Auth_Sasl_Final"
+
+    let pp = Fmt.of_to_string to_string
 
     let parse { Header.length = len; _ } =
       let p =
@@ -282,6 +307,16 @@ module Backend = struct
       { pid : Process_id.t
       ; secret : Int32.t
       }
+
+    let pp =
+      let p = Fmt.field "pid" (fun t -> t.pid) Process_id.pp
+      and s = Fmt.field "secret" (fun _ -> "<opaque>") Fmt.string in
+      Fmt.record [ p; s ]
+
+    let pp_dump =
+      let p = Fmt.Dump.field "pid" (fun t -> t.pid |> Process_id.to_int32) Fmt.int32
+      and s = Fmt.Dump.field "secret" (fun _ -> "<opaque>") Fmt.string in
+      Fmt.Dump.record [ p; s ]
 
     let parse _header =
       let parse_pid =
@@ -317,6 +352,29 @@ module Backend = struct
       | Line
       | Routine
       | Unknown of char
+
+    let to_string = function
+      | Severity -> "Severity"
+      | Non_localized_severity -> "Non localized severity"
+      | Code -> "Code"
+      | Message -> "Message"
+      | Detail -> "Detail"
+      | Hint -> "Hint"
+      | Position -> "Position"
+      | Internal_position -> "Internal Position"
+      | Internal_query -> "Internal Query"
+      | Where -> "Where"
+      | Schema_name -> "Schema Name"
+      | Table_name -> "Table Name"
+      | Column_name -> "Column Name"
+      | Datatype_name -> "Datatype Name"
+      | Constraint_name -> "Constraint Name"
+      | File -> "File"
+      | Line -> "Line"
+      | Routine -> "Routine"
+      | Unknown c -> Printf.sprintf "Unknown code: %C" c
+
+    let pp = Fmt.of_to_string to_string
 
     let parse =
       any_char
@@ -355,6 +413,16 @@ module Backend = struct
       ; message : Optional_string.t
       }
 
+    let pp =
+      let c = Fmt.field "code" (fun t -> t.code) Error_or_notice_kind.pp
+      and m = Fmt.field "message" (fun t -> t.message) Optional_string.pp in
+      Fmt.record [ c; m ]
+
+    let pp_dump =
+      let c = Fmt.Dump.field "code" (fun t -> t.code) Error_or_notice_kind.pp
+      and m = Fmt.Dump.field "message" (fun t -> t.message) Optional_string.pp in
+      Fmt.Dump.record [ c; m ]
+
     let parse_message =
       lift Optional_string.of_string parse_cstr <?> Printf.sprintf "%s_MESSAGE" K.label
 
@@ -380,6 +448,16 @@ module Backend = struct
       ; value : string
       }
 
+    let pp =
+      let n = Fmt.field "name" (fun t -> t.name) Fmt.string
+      and v = Fmt.field "value" (fun t -> t.value) Fmt.string in
+      Fmt.record [ n; v ]
+
+    let pp_dump =
+      let n = Fmt.Dump.field "name" (fun t -> t.name) Fmt.string
+      and v = Fmt.Dump.field "value" (fun t -> t.value) Fmt.string in
+      Fmt.record [ n; v ]
+
     let parse _header =
       lift2 (fun name value -> { name; value }) parse_cstr parse_cstr
       <?> "PARAMETER_STATUS"
@@ -390,6 +468,13 @@ module Backend = struct
       | Idle
       | Transaction_block
       | Failed_transaction
+
+    let to_string = function
+      | Idle -> "Idle"
+      | Transaction_block -> "Transaction_block"
+      | Failed_transaction -> "Failed_transaction"
+
+    let pp = Fmt.of_to_string to_string
 
     let parse _header =
       any_char
@@ -750,10 +835,7 @@ module Connection = struct
       Log.debug (fun m ->
           m "ParameterStatus: (%S, %S)" s.Backend.Parameter_status.name s.value)
     | NoticeResponse msg ->
-      Log.warn (fun m ->
-          m
-            "PostgresWarning: %S"
-            (msg.Backend.Notice_response.message |> Optional_string.to_string))
+      Log.warn (fun m -> m "PostgresWarning: %a" Backend.Notice_response.pp msg)
     | ReadyForQuery _ ->
       t.ready_for_query ();
       t.running_operation <- false;
@@ -785,8 +867,7 @@ module Connection = struct
   let handle_message' t msg =
     match msg with
     | Backend.ErrorResponse e ->
-      Log.err (fun m ->
-          m "Error: %S" (e.Backend.Error_response.message |> Optional_string.to_string));
+      Log.err (fun m -> m "Error: %a" Backend.Error_response.pp_dump e);
       t.on_error (`Postgres_error e)
     | _ ->
       (match t.state with

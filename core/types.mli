@@ -29,6 +29,7 @@
 module Process_id : sig
   type t
 
+  val pp : t Fmt.t [@@ocaml.toplevel_printer]
   val to_int32 : t -> int32
   val of_int32 : int32 -> t option
   val of_int32_exn : int32 -> t
@@ -39,6 +40,7 @@ module Statement_or_portal : sig
     | Statement
     | Portal
 
+  val pp : t Fmt.t [@@ocaml.toplevel_printer]
   val to_char : t -> char
   val of_char : char -> t
 end
@@ -46,6 +48,7 @@ end
 module Positive_int32 : sig
   type t
 
+  val pp : t Fmt.t [@@ocaml.toplevel_printer]
   val of_int32_exn : int32 -> t
   val to_int32 : t -> int32
 end
@@ -53,6 +56,7 @@ end
 module Optional_string : sig
   type t
 
+  val pp : t Fmt.t [@@ocaml.toplevel_printer]
   val empty : t
   val of_string : string -> t
   val to_string : t -> string
@@ -63,6 +67,7 @@ end
 module Oid : sig
   type t
 
+  val pp : t Fmt.t [@@ocaml.toplevel_printer]
   val of_int32 : int32 -> t
   val of_int_exn : int -> t
   val to_int32 : t -> int32
@@ -74,6 +79,7 @@ module Format_code : sig
     | `Text
     ]
 
+  val pp : t Fmt.t [@@ocaml.toplevel_printer]
   val of_int : int -> [> `Binary | `Text ] option
   val to_int : [< `Binary | `Text ] -> int
 end
