@@ -1,4 +1,4 @@
 (library
  (name postgres)
  (public_name postgres)
- (libraries angstrom faraday logs))
+ (libraries angstrom faraday logs fmt))
