@@ -861,7 +861,16 @@ module Connection = struct
       t.running_operation <- false;
       t.ready_for_query <- (fun () -> ());
       t.on_data_row <- (fun _ -> ())
-    | DataRow row -> t.on_data_row row
+    | DataRow row ->
+      (match t.on_data_row row with
+      | () -> ()
+      | exception exn ->
+        Log.debug (fun m ->
+            m
+              "Exception raised in the user provided row handler, discarding all future \
+               data-rows.");
+        t.on_data_row <- (fun _ -> ());
+        t.ready_for_query <- (fun () -> t.on_error (`Exn exn)))
     | _ -> ()
 
   let handle_message' t msg =

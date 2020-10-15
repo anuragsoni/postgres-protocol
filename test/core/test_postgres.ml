@@ -42,6 +42,9 @@ module Util = struct
 
   let string = Alcotest.testable Fmt.Dump.string String.equal
 
+  let exn =
+    Alcotest.testable Fmt.exn (fun e1 e2 -> Printexc.to_string e1 = Printexc.to_string e2)
+
   let read_frames frames conn =
     let msgs =
       List.map (fun f -> Bigstringaf.of_string f ~off:0 ~len:(String.length f)) frames
@@ -174,11 +177,104 @@ let test_prepare () =
     `Yield
     (Connection.next_read_operation conn)
 
+let test_fetch_rows_with_error () =
+  (* setup connection *)
+  let conn = Util.login () in
+  let prepared = ref false in
+  Connection.prepare
+    conn
+    ~statement:"SELECT * FROM USERS WHERE ID IN (?1, $2, $3)"
+    default_error_handler
+    (fun () -> prepared := true);
+  let res = Util.write_all conn in
+  Connection.report_write_result conn res;
+  let messages = [ "1\000\000\000\004"; Util.ready_for_query ] in
+  Util.read_frames messages conn;
+  Alcotest.(check bool) "Query prepared" true !prepared;
+  let error_seen = ref None in
+  let error_handler e =
+    match e with
+    | `Exn e -> error_seen := Some e
+    | _ -> ()
+  in
+  let rows_before_err = Queue.create () in
+  let on_data_row rows =
+    match rows with
+    | Some "foo" :: _ -> failwith "BOOM"
+    | Some x :: _ -> Queue.push x rows_before_err
+    | _ -> failwith "invalid row"
+  in
+  let finished = ref false in
+  let on_finish () = finished := true in
+  Connection.execute conn error_handler on_data_row on_finish;
+  let res = Util.write_all conn in
+  Connection.report_write_result conn res;
+  Alcotest.(check bool) "Execute not finished" false !finished;
+  let data_rows =
+    [ "D\000\000\000\020\000\002\000\000\000\003baz\000\000\000\003bar"
+    ; "D\000\000\000\020\000\002\000\000\000\003foo\000\000\000\003bar"
+    ; "D\000\000\000\020\000\002\000\000\000\003bba\000\000\000\003bar"
+    ; Util.ready_for_query
+    ]
+  in
+  Util.read_frames data_rows conn;
+  Alcotest.(check (list string) "Rows before error")
+    [ "baz" ]
+    (Queue.to_seq rows_before_err |> List.of_seq);
+  Alcotest.(check (option Util.exn)) "Check error" (Some (Failure "BOOM")) !error_seen;
+  Alcotest.(check bool)
+    "Error handler triggering means read-for-query not called"
+    false
+    !finished
+
+let test_fetch_rows () =
+  (* setup connection *)
+  let conn = Util.login () in
+  let prepared = ref false in
+  Connection.prepare
+    conn
+    ~statement:"SELECT * FROM USERS WHERE ID IN (?1, $2, $3)"
+    default_error_handler
+    (fun () -> prepared := true);
+  let res = Util.write_all conn in
+  Connection.report_write_result conn res;
+  let messages = [ "1\000\000\000\004"; Util.ready_for_query ] in
+  Util.read_frames messages conn;
+  Alcotest.(check bool) "Query prepared" true !prepared;
+  let out_rows = Queue.create () in
+  let on_data_row rows =
+    match rows with
+    | Some x :: Some y :: _ -> Queue.push (x, y) out_rows
+    | _ -> failwith "invalid row"
+  in
+  let finished = ref false in
+  let on_finish () = finished := true in
+  Connection.execute conn default_error_handler on_data_row on_finish;
+  let res = Util.write_all conn in
+  Connection.report_write_result conn res;
+  Alcotest.(check bool) "Execute not finished" false !finished;
+  let data_rows =
+    [ "D\000\000\000\020\000\002\000\000\000\003baz\000\000\000\003bar"
+    ; "D\000\000\000\020\000\002\000\000\000\003foo\000\000\000\003bar"
+    ; "D\000\000\000\020\000\002\000\000\000\003bba\000\000\000\003bar"
+    ; Util.ready_for_query
+    ]
+  in
+  Util.read_frames data_rows conn;
+  Alcotest.(check (list (pair Util.string Util.string)) "Rows before error")
+    [ "baz", "bar"; "foo", "bar"; "bba", "bar" ]
+    (Queue.to_seq out_rows |> List.of_seq);
+  Alcotest.(check bool) "Execute finished" true !finished
+
 let tests =
   [ "startup", [ "encode startup message", `Quick, test_startup_payload ]
   ; ( "auth"
     , [ "md5 auth", `Quick, test_md5_auth; "plain text auth", `Quick, test_plain_auth ] )
-  ; "execute", [ "prepare queries", `Quick, test_prepare ]
+  ; ( "execute"
+    , [ "prepare queries", `Quick, test_prepare
+      ; "exception in user handler", `Quick, test_fetch_rows_with_error
+      ; "fetch rows", `Quick, test_fetch_rows
+      ] )
   ]
 
 let () = Alcotest.run "Postgres" tests
