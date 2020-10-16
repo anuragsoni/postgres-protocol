@@ -29,8 +29,6 @@
 open Postgres
 open Lwt.Syntax
 
-type t = Connection.t
-
 exception Parse_error of string
 exception Postgres_error of Backend.Error_response.t
 
