@@ -1,0 +1,6 @@
+(library
+ (name pg_async)
+ (public_name pg-async)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core async postgres async_ssl))
