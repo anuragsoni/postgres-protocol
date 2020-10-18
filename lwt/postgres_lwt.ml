@@ -36,6 +36,7 @@ let wakeup_exn w err =
   let exn =
     match err with
     | `Exn e -> e
+    | `Msg e -> Failure e
     | `Parse_error m -> Parse_error m
     | `Postgres_error e -> Postgres_error e
   in

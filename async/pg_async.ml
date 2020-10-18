@@ -136,6 +136,7 @@ let fill_error ivar e =
   let err =
     match e with
     | `Exn e -> Error.of_exn e
+    | `Msg msg -> Error.of_string msg
     | `Parse_error m -> Error.of_string (sprintf "Parse_error: %s" m)
     | `Postgres_error e ->
       let msg = Fmt.strf "Postgres_error: %a" Backend.Error_response.pp e in
