@@ -727,24 +727,33 @@ module Connection = struct
     Parser.is_closed conn.reader && Serializer.is_closed conn.writer
 
   module Sequencer = struct
+    type job =
+      { run : conn -> unit
+      ; cancel : error -> unit
+      }
+
     type t =
       { conn : conn
-      ; queue : (conn -> unit) Queue.t
+      ; queue : job Queue.t
       }
 
     let conn t = t.conn
     let create conn = { conn; queue = Queue.create () }
 
-    let enqueue t on_error task =
+    let enqueue t on_error run =
       Log.debug (fun m -> m "sequencer enqueue");
-      if is_conn_closed t.conn
-      then on_error (`Msg "Connection already closed")
-      else (
-        let run conn =
-          conn.on_error <- on_error;
-          task conn
-        in
-        Queue.push run t.queue)
+      Queue.push
+        { run =
+            (fun conn ->
+              conn.on_error <- on_error;
+              run conn)
+        ; cancel = on_error
+        }
+        t.queue
+
+    let shutdown t =
+      Queue.iter (fun { cancel; _ } -> cancel (`Msg "Connection closed")) t.queue;
+      Queue.clear t.queue
 
     let is_empty t = Queue.is_empty t.queue
 
@@ -760,7 +769,7 @@ module Connection = struct
         else (
           let op = Queue.take t.queue in
           t.conn.running_operation <- true;
-          op t.conn)
+          op.run t.conn)
   end
 
   type t = Sequencer.t
@@ -801,6 +810,7 @@ module Connection = struct
 
   let shutdown conn =
     let t = Sequencer.conn conn in
+    Sequencer.shutdown conn;
     Parser.force_close t.reader;
     Serializer.close_and_drain t.writer;
     Serializer.wakeup_writer t.writer
