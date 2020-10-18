@@ -723,6 +723,9 @@ module Connection = struct
     ; mutable running_operation : bool
     }
 
+  let is_conn_closed conn =
+    Parser.is_closed conn.reader && Serializer.is_closed conn.writer
+
   module Sequencer = struct
     type t =
       { conn : conn
@@ -732,9 +735,16 @@ module Connection = struct
     let conn t = t.conn
     let create conn = { conn; queue = Queue.create () }
 
-    let enqueue t task =
+    let enqueue t on_error task =
       Log.debug (fun m -> m "sequencer enqueue");
-      Queue.push task t.queue
+      if is_conn_closed t.conn
+      then on_error (`Msg "Connection already closed")
+      else (
+        let run conn =
+          conn.on_error <- on_error;
+          task conn
+        in
+        Queue.push run t.queue)
 
     let is_empty t = Queue.is_empty t.queue
 
@@ -755,10 +765,6 @@ module Connection = struct
 
   type t = Sequencer.t
 
-  let is_closed t =
-    let conn = Sequencer.conn t in
-    Parser.is_closed conn.reader && Serializer.is_closed conn.writer
-
   let next_write_operation t =
     Sequencer.advance_if_needed t;
     Serializer.next_operation (Sequencer.conn t).writer
@@ -776,7 +782,7 @@ module Connection = struct
     Parser.feed (Sequencer.conn t).reader ~buf ~off ~len Angstrom.Unbuffered.Complete
 
   let yield_reader t thunk =
-    if is_closed t
+    if is_conn_closed (Sequencer.conn t)
     then failwith "Connection is closed"
     else if Option.is_some (Sequencer.conn t).wakeup_reader
     then failwith "Only one callback can be registered at a time"
@@ -905,7 +911,7 @@ module Connection = struct
     in
     let t' = Lazy.force t in
     let conn = Sequencer.create t' in
-    (Sequencer.enqueue conn
+    (Sequencer.enqueue conn on_error
     @@ fun t ->
     Log.debug (fun m -> m "startup");
     let startup_message =
@@ -917,10 +923,9 @@ module Connection = struct
     conn
 
   let prepare t ~statement ?(name = "") ?(oids = [||]) on_error finish =
-    (Sequencer.enqueue t
+    (Sequencer.enqueue t on_error
     @@ fun conn ->
     Log.debug (fun m -> m "prepare");
-    conn.on_error <- on_error;
     conn.ready_for_query <- finish;
     conn.state <- Parse;
     let prepare =
@@ -940,9 +945,8 @@ module Connection = struct
       on_data_row
       finish
     =
-    (Sequencer.enqueue t
+    (Sequencer.enqueue t on_error
     @@ fun conn ->
-    conn.on_error <- on_error;
     conn.ready_for_query <- finish;
     conn.state <- Execute;
     conn.on_data_row <- on_data_row;
@@ -955,7 +959,7 @@ module Connection = struct
     wakeup_reader t
 
   let close t =
-    (Sequencer.enqueue t
+    (Sequencer.enqueue t (fun _ -> ())
     @@ fun conn ->
     Serializer.terminate conn.writer;
     shutdown t);

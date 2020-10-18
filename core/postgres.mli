@@ -273,7 +273,5 @@ module Connection : sig
   val yield_reader : t -> (unit -> unit) -> unit
   val report_write_result : t -> [< `Closed | `Ok of int ] -> unit
   val report_exn : t -> exn -> unit
-  val is_closed : t -> bool
-  val shutdown : t -> unit
   val yield_writer : t -> (unit -> unit) -> unit
 end
