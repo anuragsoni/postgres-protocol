@@ -232,6 +232,7 @@ module Connection : sig
 
   type error =
     [ `Exn of exn
+    | `Msg of string
     | `Postgres_error of Backend.Error_response.t
     | `Parse_error of string
     ]
