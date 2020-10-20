@@ -742,14 +742,17 @@ module Connection = struct
 
     let enqueue t on_error run =
       Log.debug (fun m -> m "sequencer enqueue");
-      Queue.push
-        { run =
-            (fun conn ->
-              conn.on_error <- on_error;
-              run conn)
-        ; cancel = on_error
-        }
-        t.queue
+      if is_conn_closed t.conn
+      then on_error (`Msg "Connection closed")
+      else
+        Queue.push
+          { run =
+              (fun conn ->
+                conn.on_error <- on_error;
+                run conn)
+          ; cancel = on_error
+          }
+          t.queue
 
     let shutdown t =
       Queue.iter (fun { cancel; _ } -> cancel (`Msg "Connection closed")) t.queue;
