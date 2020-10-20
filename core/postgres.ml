@@ -954,8 +954,8 @@ module Connection = struct
       ?(name = "")
       ?(statement = "")
       ?(parameters = [||])
-      on_error
       on_data_row
+      on_error
       finish
     =
     (Sequencer.enqueue t on_error

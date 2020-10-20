@@ -184,8 +184,8 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn
     ~name
     ~statement
     ~parameters
-    (fill_error ivar)
     on_data_row
+    (fill_error ivar)
     (fun () -> Ivar.fill ivar (Ok ()));
   Ivar.read ivar
 

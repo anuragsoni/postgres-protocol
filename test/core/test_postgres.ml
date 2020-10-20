@@ -206,7 +206,7 @@ let test_fetch_rows_with_error () =
   in
   let finished = ref false in
   let on_finish () = finished := true in
-  Connection.execute conn error_handler on_data_row on_finish;
+  Connection.execute conn on_data_row error_handler on_finish;
   let res = Util.write_all conn in
   Connection.report_write_result conn res;
   Alcotest.(check bool) "Execute not finished" false !finished;
@@ -249,7 +249,7 @@ let test_fetch_rows () =
   in
   let finished = ref false in
   let on_finish () = finished := true in
-  Connection.execute conn default_error_handler on_data_row on_finish;
+  Connection.execute conn on_data_row default_error_handler on_finish;
   let res = Util.write_all conn in
   Connection.report_write_result conn res;
   Alcotest.(check bool) "Execute not finished" false !finished;

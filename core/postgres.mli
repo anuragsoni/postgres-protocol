@@ -256,8 +256,8 @@ module Connection : sig
     -> ?name:string
     -> ?statement:string
     -> ?parameters:Frontend.Bind.parameter array
-    -> error_handler
     -> (string option list -> unit)
+    -> error_handler
     -> (unit -> unit)
     -> unit
 

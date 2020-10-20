@@ -67,8 +67,8 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn
     ~name
     ~statement
     ~parameters
-    (wakeup_exn wakeup)
     on_data_row
+    (wakeup_exn wakeup)
     (Lwt.wakeup_later wakeup);
   finished
 
