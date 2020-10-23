@@ -174,7 +174,7 @@ let connect user_info destination =
 let prepare ~statement ?(name = "") ?(oids = [||]) conn =
   let ivar = Ivar.create () in
   Connection.prepare conn ~statement ~name ~oids (fill_error ivar) (fun () ->
-      Ivar.fill ivar (Ok ()));
+      Ivar.fill_if_empty ivar (Ok ()));
   Ivar.read ivar
 
 let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn =
@@ -186,7 +186,7 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn
     ~parameters
     on_data_row
     (fill_error ivar)
-    (fun () -> Ivar.fill ivar (Ok ()));
+    (fun () -> Ivar.fill_if_empty ivar (Ok ()));
   Ivar.read ivar
 
 let close conn =

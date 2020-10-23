@@ -155,23 +155,25 @@ module Backend : sig
   end
 
   module Error_response : sig
-    type t =
+    type message =
       { code : Error_or_notice_kind.t
       ; message : Types.Optional_string.t
       }
 
+    type t = message list
+
     val pp : t Fmt.t
-    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   module Notice_response : sig
-    type t =
+    type message =
       { code : Error_or_notice_kind.t
       ; message : Types.Optional_string.t
       }
 
+    type t = message list
+
     val pp : t Fmt.t
-    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
   end
 
   module Parameter_status : sig
