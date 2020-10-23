@@ -26,10 +26,11 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
-module Process_id = struct
-  type t = Int32.t
+open Sexplib0.Sexp_conv
 
-  let pp = Fmt.int32
+module Process_id = struct
+  type t = int32 [@@deriving sexp_of]
+
   let to_int32 t = t
   let of_int32 t = if t < 1l then None else Some t
 
@@ -46,12 +47,7 @@ module Statement_or_portal = struct
   type t =
     | Statement
     | Portal
-
-  let to_string = function
-    | Statement -> "Statement"
-    | Portal -> "Portal"
-
-  let pp = Fmt.of_to_string to_string
+  [@@deriving sexp_of]
 
   let to_char = function
     | Statement -> 'S'
@@ -67,9 +63,7 @@ module Statement_or_portal = struct
 end
 
 module Positive_int32 = struct
-  type t = Int32.t
-
-  let pp = Fmt.int32
+  type t = int32 [@@deriving sexp_of]
 
   let of_int32_exn t =
     if t > 0l
@@ -83,9 +77,8 @@ module Positive_int32 = struct
 end
 
 module Optional_string = struct
-  type t = string
+  type t = string [@@deriving sexp_of]
 
-  let pp = Fmt.string
   let empty = ""
   let of_string = Fun.id
   let to_string = Fun.id
@@ -94,9 +87,8 @@ module Optional_string = struct
 end
 
 module Oid = struct
-  type t = Int32.t
+  type t = int32 [@@deriving sexp_of]
 
-  let pp = Fmt.int32
   let of_int32 = Fun.id
   let of_int_exn = Int32.of_int
   let to_int32 = Fun.id
@@ -107,12 +99,7 @@ module Format_code = struct
     [ `Text
     | `Binary
     ]
-
-  let to_string = function
-    | `Text -> "Text"
-    | `Binary -> "Binary"
-
-  let pp = Fmt.of_to_string to_string
+  [@@deriving sexp_of]
 
   let of_int = function
     | 0 -> Some `Text

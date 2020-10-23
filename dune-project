@@ -27,7 +27,8 @@
   (faraday
    (>= 0.7.2))
   logs
-  fmt
+  sexplib0
+  (ppx_sexp_conv (>= "v0.14.1"))
   (alcotest :with-test)))
 
 (package

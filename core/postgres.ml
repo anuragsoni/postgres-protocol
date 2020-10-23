@@ -25,6 +25,7 @@
    INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
+open Sexplib0.Sexp_conv
 
 let src = Logs.Src.create "postgres.protocol"
 
@@ -51,7 +52,7 @@ module Auth = struct
   end
 end
 
-type protocol_version = V3_0
+type protocol_version = V3_0 [@@deriving sexp_of]
 
 let write_protocol_version f = function
   | V3_0 ->
@@ -67,6 +68,7 @@ module Frontend = struct
       ; database : string option
       ; protocol_version : protocol_version
       }
+    [@@deriving sexp_of]
 
     let make ~user ?database () = { user; database; protocol_version = V3_0 }
 
@@ -231,16 +233,7 @@ module Backend = struct
       { length : int
       ; kind : char
       }
-
-    let pp =
-      let l = Fmt.field "length" (fun t -> t.length) Fmt.int
-      and k = Fmt.field "kind" (fun t -> t.kind) Fmt.char in
-      Fmt.record [ l; k ]
-
-    let pp_dump =
-      let l = Fmt.Dump.field "length" (fun t -> t.length) Fmt.int
-      and k = Fmt.Dump.field "kind" (fun t -> t.kind) Fmt.char in
-      Fmt.Dump.record [ l; k ]
+    [@@deriving sexp_of]
 
     let parse =
       let parse_len =
@@ -257,29 +250,15 @@ module Backend = struct
       | Ok
       | KerberosV5
       | CleartextPassword
-      | Md5Password of string
+      | Md5Password of (string[@sexp.opaque])
       | SCMCredential
       | GSS
       | SSPI
-      | GSSContinue of string
-      | SASL of string
-      | SASLContinue of string
-      | SASLFinal of string
-
-    let to_string = function
-      | Ok -> "Auth_ok"
-      | KerberosV5 -> "Auth_KerberosV5"
-      | CleartextPassword -> "Auth_Cleartext"
-      | Md5Password _ -> "Auth_Md5Password"
-      | SCMCredential -> "Auth_SCMCredential"
-      | GSS -> "Auth_Gss"
-      | SSPI -> "Auth_Sspi"
-      | GSSContinue _ -> "Auth_Gss_Continue"
-      | SASL _ -> "Auth_Sasl"
-      | SASLContinue _ -> "Auth_Sasl_Continue"
-      | SASLFinal _ -> "Auth_Sasl_Final"
-
-    let pp = Fmt.of_to_string to_string
+      | GSSContinue of (string[@sexp.opaque])
+      | SASL of (string[@sexp.opaque])
+      | SASLContinue of (string[@sexp.opaque])
+      | SASLFinal of (string[@sexp.opaque])
+    [@@deriving sexp_of]
 
     let parse { Header.length = len; _ } =
       let p =
@@ -305,18 +284,9 @@ module Backend = struct
   module Backend_key_data = struct
     type t =
       { pid : Process_id.t
-      ; secret : Int32.t
+      ; secret : (int32[@sexp.opaque])
       }
-
-    let pp =
-      let p = Fmt.field "pid" (fun t -> t.pid) Process_id.pp
-      and s = Fmt.field "secret" (fun _ -> "<opaque>") Fmt.string in
-      Fmt.record [ p; s ]
-
-    let pp_dump =
-      let p = Fmt.Dump.field "pid" (fun t -> t.pid |> Process_id.to_int32) Fmt.int32
-      and s = Fmt.Dump.field "secret" (fun _ -> "<opaque>") Fmt.string in
-      Fmt.Dump.record [ p; s ]
+    [@@deriving sexp_of]
 
     let parse _header =
       let parse_pid =
@@ -352,29 +322,7 @@ module Backend = struct
       | Line
       | Routine
       | Unknown of char
-
-    let to_string = function
-      | Severity -> "Severity"
-      | Non_localized_severity -> "Non localized severity"
-      | Code -> "Code"
-      | Message -> "Message"
-      | Detail -> "Detail"
-      | Hint -> "Hint"
-      | Position -> "Position"
-      | Internal_position -> "Internal Position"
-      | Internal_query -> "Internal Query"
-      | Where -> "Where"
-      | Schema_name -> "Schema Name"
-      | Table_name -> "Table Name"
-      | Column_name -> "Column Name"
-      | Datatype_name -> "Datatype Name"
-      | Constraint_name -> "Constraint Name"
-      | File -> "File"
-      | Line -> "Line"
-      | Routine -> "Routine"
-      | Unknown c -> Printf.sprintf "Unknown code: %C" c
-
-    let pp = Fmt.of_to_string to_string
+    [@@deriving sexp_of]
 
     let parse =
       any_char
@@ -408,19 +356,7 @@ module Backend = struct
     val label : string
   end) =
   struct
-    type message =
-      { code : Error_or_notice_kind.t
-      ; message : Optional_string.t
-      }
-
-    type t = message list
-
-    let pp_msg =
-      let c = Fmt.Dump.field "code" (fun t -> t.code) Error_or_notice_kind.pp
-      and m = Fmt.Dump.field "message" (fun t -> t.message) Optional_string.pp in
-      Fmt.Dump.record [ c; m ]
-
-    let pp = Fmt.Dump.list pp_msg
+    type t = (Error_or_notice_kind.t * Optional_string.t) list [@@deriving sexp_of]
 
     let parse_message_string =
       lift Optional_string.of_string parse_cstr <?> Printf.sprintf "%s_MESSAGE" K.label
@@ -428,8 +364,8 @@ module Backend = struct
     let parse_message =
       Error_or_notice_kind.parse
       >>= function
-      | Unknown '\x00' as code -> return { code; message = Optional_string.empty }
-      | code -> lift (fun message -> { code; message }) parse_message_string
+      | Unknown '\x00' as code -> return (code, Optional_string.empty)
+      | code -> lift (fun message -> code, message) parse_message_string
 
     let parse _ = many_till parse_message (char '\x00') <?> K.label
   end
@@ -447,16 +383,7 @@ module Backend = struct
       { name : string
       ; value : string
       }
-
-    let pp =
-      let n = Fmt.field "name" (fun t -> t.name) Fmt.string
-      and v = Fmt.field "value" (fun t -> t.value) Fmt.string in
-      Fmt.record [ n; v ]
-
-    let pp_dump =
-      let n = Fmt.Dump.field "name" (fun t -> t.name) Fmt.string
-      and v = Fmt.Dump.field "value" (fun t -> t.value) Fmt.string in
-      Fmt.record [ n; v ]
+    [@@deriving sexp_of]
 
     let parse _header =
       lift2 (fun name value -> { name; value }) parse_cstr parse_cstr
@@ -468,13 +395,7 @@ module Backend = struct
       | Idle
       | Transaction_block
       | Failed_transaction
-
-    let to_string = function
-      | Idle -> "Idle"
-      | Transaction_block -> "Transaction_block"
-      | Failed_transaction -> "Failed_transaction"
-
-    let pp = Fmt.of_to_string to_string
+    [@@deriving sexp_of]
 
     let parse _header =
       any_char
@@ -855,7 +776,11 @@ module Connection = struct
       Log.debug (fun m ->
           m "ParameterStatus: (%S, %S)" s.Backend.Parameter_status.name s.value)
     | NoticeResponse msg ->
-      Log.warn (fun m -> m "PostgresWarning: %a" Backend.Notice_response.pp msg)
+      Log.warn (fun m ->
+          m
+            "PostgresWarning: %a"
+            Sexplib0.Sexp.pp_hum
+            (Backend.Notice_response.sexp_of_t msg))
     | ReadyForQuery _ ->
       t.ready_for_query ();
       t.running_operation <- false;

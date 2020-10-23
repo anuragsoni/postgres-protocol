@@ -30,7 +30,7 @@ val src : Logs.src
 
 module Types = Types
 
-type protocol_version = V3_0
+type protocol_version = V3_0 [@@deriving sexp_of]
 
 module Frontend : sig
   module Startup_message : sig
@@ -39,6 +39,7 @@ module Frontend : sig
       ; database : string option
       ; protocol_version : protocol_version
       }
+    [@@deriving sexp_of]
 
     val make : user:string -> ?database:string -> unit -> t
   end
@@ -99,9 +100,7 @@ module Backend : sig
       { length : int
       ; kind : char
       }
-
-    val pp : t Fmt.t
-    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
+    [@@deriving sexp_of]
   end
 
   module Auth : sig
@@ -117,18 +116,15 @@ module Backend : sig
       | SASL of string
       | SASLContinue of string
       | SASLFinal of string
-
-    val pp : t Fmt.t [@@ocaml.toplevel_printer]
+    [@@deriving sexp_of]
   end
 
   module Backend_key_data : sig
     type t =
       { pid : Types.Process_id.t
-      ; secret : Int32.t
+      ; secret : int32
       }
-
-    val pp : t Fmt.t
-    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
+    [@@deriving sexp_of]
   end
 
   module Error_or_notice_kind : sig
@@ -155,25 +151,11 @@ module Backend : sig
   end
 
   module Error_response : sig
-    type message =
-      { code : Error_or_notice_kind.t
-      ; message : Types.Optional_string.t
-      }
-
-    type t = message list
-
-    val pp : t Fmt.t
+    type t = (Error_or_notice_kind.t * Types.Optional_string.t) list [@@deriving sexp_of]
   end
 
   module Notice_response : sig
-    type message =
-      { code : Error_or_notice_kind.t
-      ; message : Types.Optional_string.t
-      }
-
-    type t = message list
-
-    val pp : t Fmt.t
+    type t = (Error_or_notice_kind.t * Types.Optional_string.t) list [@@deriving sexp_of]
   end
 
   module Parameter_status : sig
@@ -181,9 +163,7 @@ module Backend : sig
       { name : string
       ; value : string
       }
-
-    val pp : t Fmt.t
-    val pp_dump : t Fmt.t [@@ocaml.toplevel_printer]
+    [@@deriving sexp_of]
   end
 
   module Ready_for_query : sig
@@ -191,8 +171,7 @@ module Backend : sig
       | Idle
       | Transaction_block
       | Failed_transaction
-
-    val pp : t Fmt.t [@@ocaml.toplevel_printer]
+    [@@deriving sexp_of]
   end
 
   type message =
