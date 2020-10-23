@@ -408,30 +408,30 @@ module Backend = struct
     val label : string
   end) =
   struct
-    type t =
+    type message =
       { code : Error_or_notice_kind.t
       ; message : Optional_string.t
       }
 
-    let pp =
-      let c = Fmt.field "code" (fun t -> t.code) Error_or_notice_kind.pp
-      and m = Fmt.field "message" (fun t -> t.message) Optional_string.pp in
-      Fmt.record [ c; m ]
+    type t = message list
 
-    let pp_dump =
+    let pp_msg =
       let c = Fmt.Dump.field "code" (fun t -> t.code) Error_or_notice_kind.pp
       and m = Fmt.Dump.field "message" (fun t -> t.message) Optional_string.pp in
       Fmt.Dump.record [ c; m ]
 
-    let parse_message =
+    let pp = Fmt.Dump.list pp_msg
+
+    let parse_message_string =
       lift Optional_string.of_string parse_cstr <?> Printf.sprintf "%s_MESSAGE" K.label
 
-    let parse _header =
-      lift2
-        (fun code message -> { code; message })
-        Error_or_notice_kind.parse
-        parse_message
-      <?> K.label
+    let parse_message =
+      Error_or_notice_kind.parse
+      >>= function
+      | Unknown '\x00' as code -> return { code; message = Optional_string.empty }
+      | code -> lift (fun message -> { code; message }) parse_message_string
+
+    let parse _ = many_till parse_message (char '\x00') <?> K.label
   end
 
   module Error_response = Make_error_notice (struct
@@ -895,9 +895,7 @@ module Connection = struct
 
   let handle_message' t msg =
     match msg with
-    | Backend.ErrorResponse e ->
-      Log.err (fun m -> m "Error: %a" Backend.Error_response.pp_dump e);
-      t.on_error (`Postgres_error e)
+    | Backend.ErrorResponse e -> t.on_error (`Postgres_error e)
     | _ ->
       (match t.state with
       | Connect -> handle_connect t msg
