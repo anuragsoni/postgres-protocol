@@ -28,17 +28,22 @@
 
 open Postgres
 
-exception Parse_error of string
-exception Postgres_error of Backend.Error_response.t
+type error =
+  [ `Exn of exn
+  | `Msg of string
+  ]
 
-val connect : (Connection.t -> unit) -> Connection.User_info.t -> Connection.t Lwt.t
+val connect
+  :  (Connection.t -> unit)
+  -> Connection.User_info.t
+  -> (Connection.t, [> error ]) Lwt_result.t
 
 val prepare
   :  statement:string
   -> ?name:string
   -> ?oids:Types.Oid.t array
   -> Connection.t
-  -> unit Lwt.t
+  -> (unit, [> error ]) Lwt_result.t
 
 val execute
   :  ?name:string
@@ -46,6 +51,6 @@ val execute
   -> ?parameters:Frontend.Bind.parameter array
   -> (string option list -> unit)
   -> Connection.t
-  -> unit Lwt.t
+  -> (unit, [> error ]) Lwt_result.t
 
-val close : Connection.t -> unit Lwt.t
+val close : Connection.t -> (unit, [> error ]) Lwt_result.t

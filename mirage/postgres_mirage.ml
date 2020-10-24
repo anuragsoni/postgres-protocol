@@ -28,6 +28,8 @@
 
 open Lwt.Infix
 
+let ( >>=? ) = Lwt_result.( >>= )
+let ( >>|? ) = Lwt_result.( >|= )
 let src = Logs.Src.create "postgres.mirage"
 
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -125,7 +127,9 @@ struct
   let request_tls flow =
     let module FLOW = STACK.TCPV4 in
     let ssl_avail, wakeup_ssl_avail = Lwt.wait () in
-    let req = Postgres.Request_ssl.create (Lwt.wakeup_later wakeup_ssl_avail) in
+    let req =
+      Postgres.Request_ssl.create (fun r -> Lwt.wakeup_later wakeup_ssl_avail (Ok r))
+    in
     let rec loop () =
       match Postgres.Request_ssl.next_operation req with
       | `Write payload ->
@@ -136,7 +140,13 @@ struct
           loop ()
         | Error err ->
           Log.err (fun m -> m "%a" FLOW.pp_write_error err);
-          failwith "Error while sending payload requesting ssl")
+          Lwt.wakeup_later
+            wakeup_ssl_avail
+            (Fmt.error_msg
+               "Write error while sending request for ssl connection: %a"
+               FLOW.pp_write_error
+               err);
+          Lwt.return_unit)
       | `Read ->
         FLOW.read flow
         >>= (function
@@ -150,60 +160,57 @@ struct
           failwith "Unexpected eof"
         | Error err ->
           Log.err (fun m -> m "%a" FLOW.pp_error err);
-          failwith "Failed to setup ssl connection")
+          Lwt.wakeup_later
+            wakeup_ssl_avail
+            (Fmt.error_msg "Error while reading from flow: %a" FLOW.pp_error err);
+          Lwt.return_unit)
       | `Stop -> Lwt.return_unit
-      | `Fail msg -> failwith msg
+      | `Fail msg ->
+        Lwt.wakeup_later wakeup_ssl_avail (Error (`Msg msg));
+        Lwt.return_unit
     in
     Lwt.async (fun () -> loop ());
     ssl_avail
 
   let upgrade_flow conf flow =
     request_tls flow
-    >>= function
+    >>=? function
     | `Available ->
       TLS.client_of_flow conf flow
       >>= (function
-      | Ok flow -> Lwt.return flow
-      | Error _ -> failwith "Could not setup tls flow")
-    | `Unavailable -> failwith "Could not establish tls connection"
+      | Ok _ as res -> Lwt.return res
+      | Error err ->
+        Lwt.return
+          (Fmt.error_msg "Could not upgrade to tls flow: %a" TLS.pp_write_error err))
+    | `Unavailable ->
+      Lwt.return (Error (`Msg "postgres server doesn't support connecting over ssl"))
 
   let resolve dns destination =
-    let open Lwt_result.Syntax in
     match destination with
-    | Domain (d, port) ->
-      let+ i = Dns.gethostbyname dns d in
-      i, port
+    | Domain (d, port) -> Dns.gethostbyname dns d >>|? fun i -> i, port
     | Ipv4 (ip, p) -> Lwt_result.return (ip, p)
 
   let connect_inet stack dns destination =
-    let open Lwt.Infix in
     resolve dns destination
+    >>=? fun destination ->
+    STACK.TCPV4.create_connection stack destination
     >>= function
-    | Ok destination ->
-      STACK.TCPV4.create_connection stack destination
-      >>= (function
-      | Ok res -> Lwt.return res
-      | Error err ->
-        let err_msg = Format.asprintf "%a" STACK.TCPV4.pp_error err in
-        Log.err (fun m -> m "Failed to establish connection: %S" err_msg);
-        Lwt.fail_with err_msg)
-    | Error (`Msg msg) ->
-      Log.err (fun m -> m "Failed to resolve destination: %S" msg);
-      Lwt.fail_with msg
+    | Ok _ as res -> Lwt.return res
+    | Error err ->
+      Lwt.return (Fmt.error_msg "Failed to establish flow: %a" STACK.TCPV4.pp_error err)
 
   let create stack =
     let dns = Dns.create stack in
     fun ?tls_config user_info destination ->
-      let open Lwt.Infix in
       connect_inet (STACK.tcpv4 stack) dns destination
-      >>= fun flow ->
+      >>=? fun flow ->
       match tls_config with
       | None ->
         let module Io = Make_io (STACK.TCPV4) in
         Postgres_lwt.connect (fun conn -> Io.run flow conn) user_info
       | Some conf ->
         upgrade_flow conf flow
-        >>= fun flow' ->
+        >>=? fun flow' ->
         Log.info (fun m -> m "connecting over tls");
         let module Io = Make_io (TLS) in
         Postgres_lwt.connect (fun conn -> Io.run flow' conn) user_info

@@ -28,8 +28,8 @@
   ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   ----------------------------------------------------------------------------*)
 
-open Lwt.Syntax
-
+let ( >>= ) = Lwt.Infix.( >>= )
+let ( >>| ) = Lwt.Infix.( >|= )
 let src = Logs.Src.create "postgres.lwt.io"
 
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -70,7 +70,8 @@ end = struct
 
   let write t f =
     compress t;
-    let* n = f t.buffer ~off:(t.off + t.len) ~len:(Lwt_bytes.length t.buffer - t.len) in
+    f t.buffer ~off:(t.off + t.len) ~len:(Lwt_bytes.length t.buffer - t.len)
+    >>= fun n ->
     t.len <- t.len + n;
     Lwt.return n
 end
@@ -102,8 +103,8 @@ module Socket = struct
     in
     Lwt.catch
       (fun () ->
-        let+ count = Buffer.write buffer (fun buf ~off ~len -> read_bytes buf off len) in
-        if count = 0 then `Eof else `Ok count)
+        Buffer.write buffer (fun buf ~off ~len -> read_bytes buf off len)
+        >>| fun count -> if count = 0 then `Eof else `Ok count)
       (fun exn ->
         match exn with
         | Unix.Unix_error (Unix.EBADF, _, _) -> Lwt.return `Eof
@@ -122,8 +123,7 @@ module Socket = struct
               (fun { Faraday.buffer; off; len } -> Cstruct.of_bigarray buffer ~off ~len)
               iovecs
           in
-          let+ () = Tls_lwt.Unix.writev socket iovecs in
-          `Ok (Cstruct.lenv iovecs))
+          Tls_lwt.Unix.writev socket iovecs >>| fun () -> `Ok (Cstruct.lenv iovecs))
         (fun exn ->
           Log.err (fun m ->
               m "Error while writing to tls socket, %s" (Printexc.to_string exn));
@@ -150,8 +150,8 @@ let run socket conn =
     let rec aux () =
       match Connection.next_read_operation conn with
       | `Read ->
-        let* res = Socket.read socket read_buffer in
-        (match res with
+        Socket.read socket read_buffer
+        >>= (function
         | `Eof ->
           ignore
             (Buffer.read read_buffer (fun buf ~off ~len ->
@@ -181,7 +181,8 @@ let run socket conn =
     let rec aux () =
       match Connection.next_write_operation conn with
       | `Write iovecs ->
-        let* res = writev iovecs in
+        writev iovecs
+        >>= fun res ->
         Connection.report_write_result conn res;
         aux ()
       | `Yield ->
@@ -199,5 +200,5 @@ let run socket conn =
   read_loop ();
   write_loop ();
   Lwt.async (fun () ->
-      let* () = Lwt.join [ read_loop_finish; write_loop_finish ] in
-      Socket.close_if_open socket)
+      Lwt.join [ read_loop_finish; write_loop_finish ]
+      >>= fun () -> Socket.close_if_open socket)

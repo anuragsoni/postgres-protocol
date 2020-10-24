@@ -1,8 +1,6 @@
 Work-in-progress IO agnostic postgres client. Supports connections over tcp (mirage + lwt.unix) and unix_domain_sockets (lwt.unix only).
 Tcp connections also support encrypting postgres sessions over an ssl connection.
 ```ocaml
-open Lwt.Syntax
-
 (* This example uses a helper utility from postgres-lwt-unix
    that simplifies the initial connection setup. Users can provide
    there own connection runners by providing a function
