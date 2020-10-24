@@ -27,37 +27,43 @@
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
 open Postgres
-open Lwt.Syntax
 
-exception Parse_error of string
-exception Postgres_error of Backend.Error_response.t
+type error =
+  [ `Exn of exn
+  | `Msg of string
+  ]
 
-let wakeup_exn w err =
-  let exn =
+let ( >>|? ) = Lwt_result.( >|= )
+
+let wakeup_exn p w err =
+  let res =
     match err with
-    | `Exn e -> e
-    | `Msg e -> Failure e
-    | `Parse_error m -> Parse_error m
-    | `Postgres_error e -> Postgres_error e
+    | `Exn _ as e -> e
+    | `Msg _ as e -> e
+    | `Parse_error m -> `Msg m
+    | `Postgres_error e ->
+      let msg =
+        Format.asprintf "%a" Sexplib0.Sexp.pp_hum (Backend.Error_response.sexp_of_t e)
+      in
+      `Msg msg
   in
-  Lwt.wakeup_later_exn w exn
+  if Lwt.is_sleeping p then Lwt.wakeup_later w (Error res) else ()
+
+let wakeup_if_empty p w r = if Lwt.is_sleeping p then Lwt.wakeup_later w r else ()
 
 let connect run user_info =
   let finished, wakeup = Lwt.wait () in
-  let conn = Connection.connect user_info (wakeup_exn wakeup) (Lwt.wakeup_later wakeup) in
+  let conn =
+    Connection.connect user_info (wakeup_exn finished wakeup) (fun () ->
+        wakeup_if_empty finished wakeup (Ok ()))
+  in
   run conn;
-  let+ () = finished in
-  conn
+  finished >>|? fun () -> conn
 
 let prepare ~statement ?(name = "") ?(oids = [||]) conn =
   let finished, wakeup = Lwt.wait () in
-  Connection.prepare
-    conn
-    ~statement
-    ~name
-    ~oids
-    (wakeup_exn wakeup)
-    (Lwt.wakeup_later wakeup);
+  Connection.prepare conn ~statement ~name ~oids (wakeup_exn finished wakeup) (fun () ->
+      wakeup_if_empty finished wakeup (Ok ()));
   finished
 
 let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn =
@@ -68,10 +74,10 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn
     ~statement
     ~parameters
     on_data_row
-    (wakeup_exn wakeup)
-    (Lwt.wakeup_later wakeup);
+    (wakeup_exn finished wakeup)
+    (fun () -> wakeup_if_empty finished wakeup (Ok ()));
   finished
 
 let close conn =
   Connection.close conn;
-  Lwt.return_unit
+  Lwt_result.return ()

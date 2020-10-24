@@ -1,5 +1,3 @@
-open Lwt.Syntax
-
 let make_parameters ids =
   List.to_seq ids
   |> Seq.map (fun id ->
@@ -41,13 +39,22 @@ let () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level ~all:true (Some Info);
   Fmt_tty.setup_std_outputs ();
+  let res =
+    let open Lwt_result.Syntax in
+    let* conn = connect "localhost" 5432 "asoni" "password" in
+    let name = "my_unique_query" in
+    let* () = prepare_query name conn in
+    let* () = run name conn [ 9l; 2l; 3l ]
+    and* () = run name conn [ 2l; 4l; 10l ]
+    and* () = run name conn [ 1l; 7l; 4l ]
+    and* () = run name conn [ 78l; 11l; 6l ] in
+    let+ () = Postgres_lwt.close conn in
+    Logs.info (fun m -> m "Finished")
+  in
+  let open Lwt.Infix in
   Lwt_main.run
-    (let* conn = connect "localhost" 5432 "asoni" "password" in
-     let name = "my_unique_query" in
-     let* () = prepare_query name conn in
-     let* () = run name conn [ 9l; 2l; 3l ]
-     and* () = run name conn [ 2l; 4l; 10l ]
-     and* () = run name conn [ 1l; 7l; 5l ]
-     and* () = run name conn [ 78l; 11l; 6l ] in
-     let+ () = Postgres_lwt.close conn in
-     Logs.info (fun m -> m "Finished"))
+    (res
+    >>= function
+    | Ok () -> Lwt.return ()
+    | Error (`Exn exn) -> Lwt.fail exn
+    | Error (`Msg msg) -> Lwt.fail_with msg)

@@ -1,5 +1,3 @@
-open Lwt.Syntax
-
 module Make
     (STACK : Mirage_stack.V4)
     (TIME : Mirage_time.S)
@@ -56,13 +54,22 @@ struct
     let user = Key_gen.pguser () in
     let password = Key_gen.pgpassword () in
     let database = Key_gen.pgdatabase () in
-    let* conn = connect stack "asoni" "password" "localhost" 5432 in
-    let name = "my_unique_query" in
-    let* () = prepare_query name conn in
-    let* () = run name conn [ 9l; 2l; 3l ]
-    and* () = run name conn [ 2l; 4l; 10l ]
-    and* () = run name conn [ 1l; 7l; 5l ]
-    and* () = run name conn [ 78l; 11l; 6l ] in
-    let+ () = Postgres_lwt.close conn in
-    Logs.info (fun m -> m "Finished")
+    let res =
+      let open Lwt_result.Syntax in
+      let* conn = connect stack "asoni" "password" "localhost" 5432 in
+      let name = "my_unique_query" in
+      let* () = prepare_query name conn in
+      let* () = run name conn [ 9l; 2l; 3l ]
+      and* () = run name conn [ 2l; 4l; 10l ]
+      and* () = run name conn [ 1l; 7l; 2l ]
+      and* () = run name conn [ 78l; 11l; 6l ] in
+      let+ () = Postgres_lwt.close conn in
+      Logs.info (fun m -> m "Finished")
+    in
+    let open Lwt.Infix in
+    res
+    >>= function
+    | Ok () -> Lwt.return ()
+    | Error (`Exn exn) -> Lwt.fail exn
+    | Error (`Msg msg) -> Lwt.fail_with msg
 end
