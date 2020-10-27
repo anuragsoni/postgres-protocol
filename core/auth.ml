@@ -26,56 +26,12 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
-module Process_id : sig
-  type t [@@deriving sexp_of]
-
-  val to_int32 : t -> int32
-  val of_int32 : int32 -> t option
-  val of_int32_exn : int32 -> t
-end
-
-module Statement_or_portal : sig
-  type t =
-    | Statement
-    | Portal
-  [@@deriving sexp_of]
-
-  val to_char : t -> char
-  val of_char : char -> t
-end
-
-module Positive_int32 : sig
-  type t [@@deriving sexp_of]
-
-  val of_int32_exn : int32 -> t
-  val to_int32 : t -> int32
-end
-
-module Optional_string : sig
-  type t [@@deriving sexp_of]
-
-  val empty : t
-  val of_string : string -> t
-  val to_string : t -> string
-  val is_empty : t -> bool
-  val length : t -> int
-end
-
-module Oid : sig
-  type t [@@deriving sexp_of]
-
-  val of_int32 : int32 -> t
-  val of_int_exn : int -> t
-  val to_int32 : t -> int32
-end
-
-module Format_code : sig
-  type t =
-    [ `Binary
-    | `Text
-    ]
-  [@@deriving sexp_of]
-
-  val of_int : int -> [> `Binary | `Text ] option
-  val to_int : [< `Binary | `Text ] -> int
+module Md5 = struct
+  (* https://www.postgresql.org/docs/12/protocol-flow.html#id-1.10.5.7.3 *)
+  let hash ~username ~password ~salt =
+    let digest = Digest.string (password ^ username) in
+    let hex = Digest.to_hex digest in
+    let digest = Digest.string (hex ^ salt) in
+    let hex = Digest.to_hex digest in
+    Printf.sprintf "md5%s" hex
 end
