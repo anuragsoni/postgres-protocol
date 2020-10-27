@@ -26,10 +26,42 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
-let log_src = Logger.src
+let to_response = function
+  | 'S' -> `Available
+  | _ -> `Unavailable
 
-module Types = Types
-module Frontend = Frontend
-module Backend = Backend
-module Request_ssl = Request_ssl
-module Connection = Connection
+let payload =
+  let b = Bytes.create 8 in
+  Bytes.set_int32_be b 0 8l;
+  Bytes.set_int16_be b 4 1234;
+  Bytes.set_int16_be b 6 5679;
+  b
+
+type state =
+  | Write
+  | Read
+  | Fail of string
+  | Closed
+
+type t =
+  { mutable state : state
+  ; on_finish : [ `Available | `Unavailable ] -> unit
+  }
+
+let create on_finish = { state = Write; on_finish }
+
+let next_operation t =
+  match t.state with
+  | Write -> `Write payload
+  | Read -> `Read
+  | Fail msg -> `Fail msg
+  | Closed -> `Stop
+
+let report_write_result t = function
+  | 8 -> t.state <- Read
+  | _ -> t.state <- Fail "Could not write the ssl request payload successfully."
+
+let feed_char t c =
+  let resp = to_response c in
+  t.state <- Closed;
+  t.on_finish resp
