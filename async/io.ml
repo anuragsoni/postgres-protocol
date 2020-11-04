@@ -94,19 +94,15 @@ module Socket = struct
   let writev writer iovecs =
     match Writer.is_closed writer with
     (* schedule_iovecs will throw if the writer is closed. Checking for the writer status
-       here avoids that and allows to report the closed status to connection. *)
-    | true -> return `Closed
+       here avoids that and allows to report the closed status to httpaf. *)
+    | true -> `Closed
     | false ->
-      let u_iovecs = Queue.create () in
-      let count =
-        List.fold iovecs ~init:0 ~f:(fun acc { Faraday.buffer; off; len } ->
-            Queue.enqueue u_iovecs (Unix.IOVec.of_bigstring buffer ~pos:off ~len);
+      let total_bytes =
+        List.fold_left iovecs ~init:0 ~f:(fun acc { Faraday.buffer; off; len } ->
+            Writer.write_bigstring writer buffer ~pos:off ~len;
             acc + len)
       in
-      Writer.schedule_iovecs writer u_iovecs;
-      (* It is not safe to reuse the underlying bigstrings until the writer is flushed or
-         closed. *)
-      Writer.flushed writer >>| fun () -> `Ok count
+      `Ok total_bytes
 end
 
 open Postgres
@@ -138,8 +134,7 @@ let run conn reader writer =
   let rec write_loop () =
     match Connection.next_write_operation conn with
     | `Write iovecs ->
-      Socket.writev writer iovecs
-      >>> fun result ->
+      let result = Socket.writev writer iovecs in
       Connection.report_write_result conn result;
       write_loop ()
     | `Yield -> Connection.yield_writer conn write_loop
