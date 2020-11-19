@@ -2,4 +2,3 @@ version=0.15.0
 profile=janestreet
 parse-docstrings=true
 wrap-comments=true
-let-binding-spacing=compact

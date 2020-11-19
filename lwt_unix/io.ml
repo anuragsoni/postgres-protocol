@@ -50,6 +50,7 @@ end = struct
   let create size =
     let buffer = Lwt_bytes.create size in
     { buffer; off = 0; len = 0 }
+  ;;
 
   let compress t =
     if t.len = 0
@@ -60,6 +61,7 @@ end = struct
     then (
       Lwt_bytes.blit t.buffer t.off t.buffer 0 t.len;
       t.off <- 0)
+  ;;
 
   let read t f =
     let n = f t.buffer ~off:t.off ~len:t.len in
@@ -67,6 +69,7 @@ end = struct
     t.len <- t.len - n;
     if t.len = 0 then t.off <- 0;
     n
+  ;;
 
   let write t f =
     compress t;
@@ -74,6 +77,7 @@ end = struct
     >>= fun n ->
     t.len <- t.len + n;
     Lwt.return n
+  ;;
 end
 
 module Socket = struct
@@ -90,10 +94,12 @@ module Socket = struct
           Log.warn (fun m -> m "Error while closing socket: %s" (Printexc.to_string exn));
           Lwt.return_unit)
     else Lwt.return_unit
+  ;;
 
   let close_if_open = function
     | Regular socket -> close_lwt_socket_if_open socket
     | Tls socket -> Tls_lwt.Unix.close socket
+  ;;
 
   let read socket buffer =
     let read_bytes =
@@ -111,6 +117,7 @@ module Socket = struct
         | _ ->
           Lwt.async (fun () -> close_if_open socket);
           Lwt.fail exn)
+  ;;
 
   let writev socket iovecs =
     match socket with
@@ -130,6 +137,7 @@ module Socket = struct
           match exn with
           | Unix.Unix_error (Unix.EBADF, "check_descriptor", _) -> Lwt.return `Closed
           | _ -> Lwt.fail exn)
+  ;;
 
   let shutdown_if_open socket =
     match socket with
@@ -139,6 +147,7 @@ module Socket = struct
         try Lwt_unix.shutdown socket Lwt_unix.SHUTDOWN_RECEIVE with
         | Unix.Unix_error (Unix.ENOTCONN, _, _) -> ())
     | Tls _ -> ()
+  ;;
 end
 
 open Postgres
@@ -202,3 +211,4 @@ let run socket conn =
   Lwt.async (fun () ->
       Lwt.join [ read_loop_finish; write_loop_finish ]
       >>= fun () -> Socket.close_if_open socket)
+;;

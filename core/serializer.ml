@@ -34,17 +34,20 @@ type t =
 
 let create ?(size = 0x1000) () =
   { writer = Faraday.create size; wakeup_writer = None; drained_bytes = 0 }
+;;
 
 let yield_writer t thunk =
   if Faraday.is_closed t.writer then failwith "Serializer is closed";
   match t.wakeup_writer with
   | None -> t.wakeup_writer <- Some thunk
   | Some _ -> failwith "Only one write callback can be registered at a time"
+;;
 
 let wakeup_writer t =
   let thunk = t.wakeup_writer in
   t.wakeup_writer <- None;
   Option.iter (fun t -> t ()) thunk
+;;
 
 let is_closed t = Faraday.is_closed t.writer
 let drain t = Faraday.drain t.writer
@@ -52,11 +55,13 @@ let drain t = Faraday.drain t.writer
 let close_and_drain t =
   Faraday.close t.writer;
   t.drained_bytes <- drain t
+;;
 
 let report_write_result t res =
   match res with
   | `Closed -> close_and_drain t
   | `Ok n -> Faraday.shift t.writer n
+;;
 
 module type Message = sig
   type t
@@ -71,10 +76,12 @@ let write (type a) (module M : Message with type t = a) msg t =
   Option.iter (fun c -> Faraday.write_char t.writer c) M.ident;
   Faraday.BE.write_uint32 t.writer (Int32.of_int @@ (M.size msg + header_length));
   M.write t.writer msg
+;;
 
 let write_ident_only ident t =
   Faraday.write_char t.writer ident;
   Faraday.BE.write_uint32 t.writer 4l
+;;
 
 let startup t msg = write (module Frontend.Startup_message) msg t
 let password t msg = write (module Frontend.Password_message) msg t
@@ -89,3 +96,4 @@ let next_operation t =
   | `Close -> `Close t.drained_bytes
   | `Yield -> `Yield
   | `Writev iovecs -> `Write iovecs
+;;

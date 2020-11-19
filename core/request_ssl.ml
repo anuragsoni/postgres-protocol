@@ -29,6 +29,7 @@
 let to_response = function
   | 'S' -> `Available
   | _ -> `Unavailable
+;;
 
 let payload =
   let b = Bytes.create 8 in
@@ -36,6 +37,7 @@ let payload =
   Bytes.set_int16_be b 4 1234;
   Bytes.set_int16_be b 6 5679;
   b
+;;
 
 type state =
   | Write
@@ -56,12 +58,15 @@ let next_operation t =
   | Read -> `Read
   | Fail msg -> `Fail msg
   | Closed -> `Stop
+;;
 
 let report_write_result t = function
   | 8 -> t.state <- Read
   | _ -> t.state <- Fail "Could not write the ssl request payload successfully."
+;;
 
 let feed_char t c =
   let resp = to_response c in
   t.state <- Closed;
   t.on_finish resp
+;;

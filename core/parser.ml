@@ -37,6 +37,7 @@ type t =
 let create parser handler =
   let parser = Angstrom.(skip_many (parser <* commit >>| handler)) in
   { parser; parse_state = U.Done (0, ()); closed = false }
+;;
 
 let next_action t =
   match t.parse_state with
@@ -44,6 +45,7 @@ let next_action t =
   | U.Done _ -> `Read
   | Partial _ -> `Read
   | Fail (_, _, _msg) -> `Close
+;;
 
 let parse t ~buf ~off ~len more =
   let rec aux t =
@@ -59,6 +61,7 @@ let parse t ~buf ~off ~len more =
   match t.parse_state with
   | U.Partial { committed; _ } | U.Done (committed, ()) | U.Fail (committed, _, _) ->
     committed
+;;
 
 let feed t ~buf ~off ~len more =
   let committed = parse t ~buf ~off ~len more in
@@ -66,6 +69,7 @@ let feed t ~buf ~off ~len more =
   | U.Complete -> t.closed <- true
   | Incomplete -> ());
   committed
+;;
 
 let is_closed t = t.closed
 let force_close t = t.closed <- true

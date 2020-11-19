@@ -56,6 +56,7 @@ end = struct
   let create size =
     let buffer = Bigstring.create size in
     { buffer; off = 0; len = 0 }
+  ;;
 
   let compress t =
     if t.len = 0
@@ -66,6 +67,7 @@ end = struct
     then (
       Bigstring.blit ~src:t.buffer ~src_pos:t.off ~dst:t.buffer ~dst_pos:0 ~len:t.len;
       t.off <- 0)
+  ;;
 
   let read t f =
     let n = f t.buffer ~off:t.off ~len:t.len in
@@ -73,6 +75,7 @@ end = struct
     t.len <- t.len - n;
     if t.len = 0 then t.off <- 0;
     n
+  ;;
 
   let write t f =
     compress t;
@@ -83,6 +86,7 @@ end = struct
     | `Ok n as r ->
       t.len <- t.len + n;
       r
+  ;;
 end
 
 module Socket = struct
@@ -90,6 +94,7 @@ module Socket = struct
     Buffer.write buffer (fun buf ~off ~len ->
         let bstr = Bigsubstring.create buf ~pos:off ~len in
         Reader.read_bigsubstring reader bstr)
+  ;;
 
   let writev writer iovecs =
     match Writer.is_closed writer with
@@ -103,6 +108,7 @@ module Socket = struct
             acc + len)
       in
       `Ok total_bytes
+  ;;
 end
 
 open Postgres
@@ -145,3 +151,4 @@ let run conn reader writer =
   Scheduler.within ~monitor write_loop;
   Monitor.detach_and_iter_errors monitor ~f:(fun exn -> Connection.report_exn conn exn);
   Deferred.all_unit [ Ivar.read write_loop_finished; Ivar.read read_loop_finished ]
+;;

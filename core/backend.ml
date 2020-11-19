@@ -47,6 +47,7 @@ module Header = struct
       if l < 4 then fail (Printf.sprintf "Invalid payload length: %d" l) else return l
     in
     lift2 (fun kind length -> { kind; length }) any_char parse_len <?> "MESSAGE_HEADER"
+  ;;
 end
 
 module Auth = struct
@@ -83,6 +84,7 @@ module Auth = struct
       | k -> fail (Printf.sprintf "Unknown authentication type: %ld" k)
     in
     p <?> "PARSE_AUTH"
+  ;;
 end
 
 module Backend_key_data = struct
@@ -103,6 +105,7 @@ module Backend_key_data = struct
     in
     lift2 (fun pid secret -> { pid; secret }) parse_pid BE.any_int32
     <?> "BACKEND_KEY_DATA"
+  ;;
 end
 
 module Error_or_notice_kind = struct
@@ -154,6 +157,7 @@ module Error_or_notice_kind = struct
       | c -> Unknown c
     in
     return t
+  ;;
 end
 
 module Make_error_notice (K : sig
@@ -164,12 +168,14 @@ struct
 
   let parse_message_string =
     lift Optional_string.of_string parse_cstr <?> Printf.sprintf "%s_MESSAGE" K.label
+  ;;
 
   let parse_message =
     Error_or_notice_kind.parse
     >>= function
     | Unknown '\x00' as code -> return (code, Optional_string.empty)
     | code -> lift (fun message -> code, message) parse_message_string
+  ;;
 
   let parse _ = many_till parse_message (char '\x00') <?> K.label
 end
@@ -191,6 +197,7 @@ module Parameter_status = struct
 
   let parse _header =
     lift2 (fun name value -> { name; value }) parse_cstr parse_cstr <?> "PARAMETER_STATUS"
+  ;;
 end
 
 module Ready_for_query = struct
@@ -208,6 +215,7 @@ module Ready_for_query = struct
           | 'E' -> return Failed_transaction
           | c -> fail @@ Printf.sprintf "Unknown response for ReadyForQuery: %C" c)
     <?> "READY_FOR_QUERY"
+  ;;
 end
 
 module Data_row = struct
@@ -219,6 +227,7 @@ module Data_row = struct
       (BE.any_int32
       >>= fun l ->
       if l = -1l then return None else lift Option.some @@ take (Int32.to_int l))
+  ;;
 end
 
 type message =
@@ -251,3 +260,4 @@ let parse =
   | c ->
     Logger.warn (fun m -> m "Received an unknown message with ident: %C" c);
     take (length - 4) *> (return @@ UnknownMessage c)
+;;

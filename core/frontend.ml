@@ -35,10 +35,12 @@ let write_protocol_version f = function
   | V3_0 ->
     Faraday.BE.write_uint16 f 3;
     Faraday.BE.write_uint16 f 0
+;;
 
 let write_cstr f s =
   Faraday.write_string f s;
   Faraday.write_uint8 f 0
+;;
 
 module Startup_message = struct
   let ident = None
@@ -62,6 +64,7 @@ module Startup_message = struct
         write_cstr f d)
       database;
     Faraday.write_uint8 f 0
+  ;;
 
   let size { user; database; _ } =
     let user_len = 4 + 1 + String.length user + 1 in
@@ -71,6 +74,7 @@ module Startup_message = struct
       | Some d -> 8 + 1 + String.length d + 1
     in
     4 + user_len + database_len + 1
+  ;;
 end
 
 module Password_message = struct
@@ -98,12 +102,14 @@ module Parse = struct
     + 1
     + 2
     + (Array.length oids * 4)
+  ;;
 
   let write f { name; statement; oids } =
     write_cstr f (Optional_string.to_string name);
     write_cstr f statement;
     Faraday.BE.write_uint16 f (Array.length oids);
     Array.iter (fun oid -> Faraday.BE.write_uint32 f (Oid.to_int32 oid)) oids
+  ;;
 end
 
 module Bind = struct
@@ -135,6 +141,7 @@ module Bind = struct
     ; parameters
     ; result_formats
     }
+  ;;
 
   let size { destination; statement; parameters; result_formats } =
     let param_len = Array.length parameters in
@@ -152,6 +159,7 @@ module Bind = struct
         parameters
     + 2
     + (Array.length result_formats * 2)
+  ;;
 
   let write f { destination; statement; parameters; result_formats } =
     write_cstr f (Optional_string.to_string destination);
@@ -176,6 +184,7 @@ module Bind = struct
     Array.iter
       (fun fmt -> Faraday.BE.write_uint16 f (Format_code.to_int fmt))
       result_formats
+  ;;
 end
 
 module Execute = struct
@@ -197,6 +206,7 @@ module Execute = struct
       | `Count p -> Positive_int32.to_int32 p
     in
     Faraday.BE.write_uint32 f count
+  ;;
 end
 
 let sync = 'S'

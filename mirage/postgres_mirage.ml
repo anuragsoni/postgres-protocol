@@ -113,6 +113,7 @@ module Make_io (FLOW : Mirage_flow.S) = struct
     write_loop ();
     Lwt.async (fun () ->
         Lwt.join [ read_loop_finish; write_loop_finish ] >>= fun () -> FLOW.close flow)
+  ;;
 end
 
 module Make
@@ -171,6 +172,7 @@ struct
     in
     Lwt.async (fun () -> loop ());
     ssl_avail
+  ;;
 
   let upgrade_flow conf flow =
     request_tls flow
@@ -184,11 +186,13 @@ struct
           (Fmt.error_msg "Could not upgrade to tls flow: %a" TLS.pp_write_error err))
     | `Unavailable ->
       Lwt.return (Error (`Msg "postgres server doesn't support connecting over ssl"))
+  ;;
 
   let resolve dns destination =
     match destination with
     | Domain (d, port) -> Dns.gethostbyname dns d >>|? fun i -> i, port
     | Ipv4 (ip, p) -> Lwt_result.return (ip, p)
+  ;;
 
   let connect_inet stack dns destination =
     resolve dns destination
@@ -198,6 +202,7 @@ struct
     | Ok _ as res -> Lwt.return res
     | Error err ->
       Lwt.return (Fmt.error_msg "Failed to establish flow: %a" STACK.TCPV4.pp_error err)
+  ;;
 
   let create stack =
     let dns = Dns.create stack in
@@ -214,4 +219,5 @@ struct
         Log.info (fun m -> m "connecting over tls");
         let module Io = Make_io (TLS) in
         Postgres_lwt.connect (fun conn -> Io.run flow' conn) user_info
+  ;;
 end

@@ -7,12 +7,14 @@ let make_parameters ids =
          Caml.Bytes.set_int32_be b 0 id;
          Postgres.Frontend.Bind.make_param ~parameter:(Bytes.to_string b) `Binary ())
   |> Sequence.to_array
+;;
 
 let prepare_query name conn =
   Postgres_lwt.prepare
     ~name
     ~statement:"SELECT id, email from users where id IN ($1, $2, $3)"
     conn
+;;
 
 let run name conn ids =
   let parameters = make_parameters ids in
@@ -26,6 +28,7 @@ let run name conn ids =
       | [ Some id; Some name ] -> Logs.info (fun m -> m "Id: %s and email: %s" id name)
       | _ -> assert false)
     conn
+;;
 
 let execute conn =
   let open Lwt_result.Syntax in
@@ -37,6 +40,7 @@ let execute conn =
   and* () = run name conn [ 78l; 11l; 6l ] in
   let+ () = Postgres_lwt.close conn in
   Logs.info (fun m -> m "Finished")
+;;
 
 let run host port user password database ssl =
   let open Lwt.Infix in
@@ -57,6 +61,7 @@ let run host port user password database ssl =
   let open Lwt_result.Infix in
   Postgres_lwt_unix.(connect ?tls_config user_info (Inet (host, port)))
   >>= fun conn -> execute conn
+;;
 
 let command =
   Command.basic
@@ -79,6 +84,7 @@ let command =
         | Ok () -> Lwt.return ()
         | Error (`Exn exn) -> Lwt.fail exn
         | Error (`Msg msg) -> Lwt.fail_with msg)
+;;
 
 let () = Mirage_crypto_rng_unix.initialize ()
 
@@ -87,3 +93,4 @@ let () =
   Logs.set_level ~all:true (Some Info);
   Fmt_tty.setup_std_outputs ();
   Command.run command
+;;

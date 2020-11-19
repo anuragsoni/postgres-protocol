@@ -96,10 +96,12 @@ module Sequencer = struct
         ; cancel = on_error
         }
         t.queue
+  ;;
 
   let shutdown t =
     Queue.iter (fun { cancel; _ } -> cancel (`Msg "Connection closed")) t.queue;
     Queue.clear t.queue
+  ;;
 
   let is_empty t = Queue.is_empty t.queue
 
@@ -116,6 +118,7 @@ module Sequencer = struct
         let op = Queue.take t.queue in
         t.conn.running_operation <- true;
         op.run t.conn)
+  ;;
 end
 
 type t = Sequencer.t
@@ -123,18 +126,22 @@ type t = Sequencer.t
 let next_write_operation t =
   Sequencer.advance_if_needed t;
   Serializer.next_operation (Sequencer.conn t).writer
+;;
 
 let next_read_operation t =
   Sequencer.advance_if_needed t;
   if Sequencer.is_empty t && (Sequencer.conn t).running_operation = false
   then `Yield
   else Parser.next_action (Sequencer.conn t).reader
+;;
 
 let read t buf ~off ~len =
   Parser.feed (Sequencer.conn t).reader ~buf ~off ~len Angstrom.Unbuffered.Incomplete
+;;
 
 let read_eof t buf ~off ~len =
   Parser.feed (Sequencer.conn t).reader ~buf ~off ~len Angstrom.Unbuffered.Complete
+;;
 
 let yield_reader t thunk =
   if is_conn_closed (Sequencer.conn t)
@@ -142,17 +149,20 @@ let yield_reader t thunk =
   else if Option.is_some (Sequencer.conn t).wakeup_reader
   then failwith "Only one callback can be registered at a time"
   else (Sequencer.conn t).wakeup_reader <- Some thunk
+;;
 
 let wakeup_reader t =
   let conn = Sequencer.conn t in
   let thunk = conn.wakeup_reader in
   conn.wakeup_reader <- None;
   Option.iter (fun t -> t ()) thunk
+;;
 
 let yield_writer t thunk = Serializer.yield_writer (Sequencer.conn t).writer thunk
 
 let report_write_result t res =
   Serializer.report_write_result (Sequencer.conn t).writer res
+;;
 
 let shutdown conn =
   let t = Sequencer.conn conn in
@@ -160,10 +170,12 @@ let shutdown conn =
   Parser.force_close t.reader;
   Serializer.close_and_drain t.writer;
   Serializer.wakeup_writer t.writer
+;;
 
 let report_exn t exn =
   shutdown t;
   (Sequencer.conn t).on_error (`Exn exn)
+;;
 
 let handle_auth_message t msg =
   let r msg = raise @@ Auth_method_not_implemented msg in
@@ -188,6 +200,7 @@ let handle_auth_message t msg =
   | SASL _ -> r "SASL"
   | SASLContinue _ -> r "SASLContinue"
   | SASLFinal _ -> r "SASLFinal"
+;;
 
 let handle_connect t msg =
   match msg with
@@ -208,6 +221,7 @@ let handle_connect t msg =
   | _ ->
     (* Ignore other messages during startup *)
     ()
+;;
 
 let handle_parse t msg =
   match msg with
@@ -217,6 +231,7 @@ let handle_parse t msg =
     t.running_operation <- false;
     t.ready_for_query <- (fun () -> ())
   | _ -> ()
+;;
 
 let handle_execute t msg =
   match msg with
@@ -237,6 +252,7 @@ let handle_execute t msg =
       t.on_data_row <- (fun _ -> ());
       t.ready_for_query <- (fun () -> t.on_error (`Exn exn)))
   | _ -> ()
+;;
 
 let handle_message' t msg =
   match msg with
@@ -246,6 +262,7 @@ let handle_message' t msg =
     | Connect -> handle_connect t msg
     | Parse -> handle_parse t msg
     | Execute -> handle_execute t msg)
+;;
 
 let connect user_info on_error finish =
   let rec handle_message msg =
@@ -277,6 +294,7 @@ let connect user_info on_error finish =
   Serializer.wakeup_writer t.writer);
   wakeup_reader conn;
   conn
+;;
 
 let prepare t ~statement ?(name = "") ?(oids = [||]) on_error finish =
   (Sequencer.enqueue t on_error
@@ -291,6 +309,7 @@ let prepare t ~statement ?(name = "") ?(oids = [||]) on_error finish =
   Serializer.sync conn.writer;
   Serializer.wakeup_writer conn.writer);
   wakeup_reader t
+;;
 
 let execute
     t
@@ -313,6 +332,7 @@ let execute
   Serializer.sync conn.writer;
   Serializer.wakeup_writer conn.writer);
   wakeup_reader t
+;;
 
 let close t =
   (Sequencer.enqueue t (fun _ -> ())
@@ -320,3 +340,4 @@ let close t =
   Serializer.terminate conn.writer;
   shutdown t);
   wakeup_reader t
+;;

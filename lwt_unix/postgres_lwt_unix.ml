@@ -29,6 +29,7 @@ let connect_inet host port =
           run xs)
   in
   run addr_info
+;;
 
 let request_ssl socket =
   let ssl_avail, wakeup_ssl_avail = Lwt.wait () in
@@ -61,6 +62,7 @@ let request_ssl socket =
   in
   Lwt.async (fun () -> loop ());
   ssl_avail
+;;
 
 let connect ?tls_config user_info destination =
   (match destination with
@@ -88,3 +90,4 @@ let connect ?tls_config user_info destination =
       Log.err (fun m ->
           m "Could not create postgres connection. %s" (Printexc.to_string exn));
       Lwt_unix.close socket >>= fun () -> Lwt_result.fail (`Exn exn))
+;;

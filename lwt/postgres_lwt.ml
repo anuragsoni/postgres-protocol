@@ -48,6 +48,7 @@ let wakeup_exn p w err =
       `Msg msg
   in
   if Lwt.is_sleeping p then Lwt.wakeup_later w (Error res) else ()
+;;
 
 let wakeup_if_empty p w r = if Lwt.is_sleeping p then Lwt.wakeup_later w r else ()
 
@@ -59,12 +60,14 @@ let connect run user_info =
   in
   run conn;
   finished >>|? fun () -> conn
+;;
 
 let prepare ~statement ?(name = "") ?(oids = [||]) conn =
   let finished, wakeup = Lwt.wait () in
   Connection.prepare conn ~statement ~name ~oids (wakeup_exn finished wakeup) (fun () ->
       wakeup_if_empty finished wakeup (Ok ()));
   finished
+;;
 
 let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn =
   let finished, wakeup = Lwt.wait () in
@@ -77,7 +80,9 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn
     (wakeup_exn finished wakeup)
     (fun () -> wakeup_if_empty finished wakeup (Ok ()));
   finished
+;;
 
 let close conn =
   Connection.close conn;
   Lwt_result.return ()
+;;

@@ -15,12 +15,14 @@ struct
            Bytes.set_int32_be b 0 id;
            Postgres.Frontend.Bind.make_param ~parameter:(Bytes.to_string b) `Binary ())
     |> Array.of_seq
+  ;;
 
   let prepare_query name conn =
     Postgres_lwt.prepare
       ~name
       ~statement:"SELECT id, email from users where id IN ($1, $2, $3)"
       conn
+  ;;
 
   let run name conn ids =
     let parameters = make_parameters ids in
@@ -36,6 +38,7 @@ struct
           Logs.info (fun m -> m "Id: %a and email: %a" pp_opt id pp_opt name)
         | _ -> assert false)
       conn
+  ;;
 
   let connect stack user password host port =
     let authenticator ~host:_ _ = Ok None in
@@ -43,6 +46,7 @@ struct
     let domain = Domain_name.of_string_exn host |> Domain_name.host_exn in
     let user_info = Postgres.Connection.User_info.make ~user ~password () in
     PG.create stack ~tls_config user_info Postgres_mirage.(Domain (domain, port))
+  ;;
 
   let start stack _time _random _mclock pclock =
     Logs.(set_level (Some Info));
@@ -72,4 +76,5 @@ struct
     | Ok () -> Lwt.return ()
     | Error (`Exn exn) -> Lwt.fail exn
     | Error (`Msg msg) -> Lwt.fail_with msg
+  ;;
 end

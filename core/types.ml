@@ -41,6 +41,7 @@ module Process_id = struct
       @@ Invalid_argument
            (Printf.sprintf "Process id needs to be a positive integer. Received: %ld" t)
     | Some v -> v
+  ;;
 end
 
 module Statement_or_portal = struct
@@ -52,6 +53,7 @@ module Statement_or_portal = struct
   let to_char = function
     | Statement -> 'S'
     | Portal -> 'P'
+  ;;
 
   let of_char = function
     | 'S' -> Statement
@@ -60,6 +62,7 @@ module Statement_or_portal = struct
       raise
       @@ Invalid_argument
            (Printf.sprintf "Expected Statement('S') or Portal('P') but received '%c'" c)
+  ;;
 end
 
 module Positive_int32 = struct
@@ -72,6 +75,7 @@ module Positive_int32 = struct
       raise
       @@ Invalid_argument
            (Printf.sprintf "Expected positive integer, but received %ld instead" t)
+  ;;
 
   let to_int32 t = t
 end
@@ -105,8 +109,10 @@ module Format_code = struct
     | 0 -> Some `Text
     | 1 -> Some `Binary
     | _ -> None
+  ;;
 
   let to_int = function
     | `Text -> 0
     | `Binary -> 1
+  ;;
 end

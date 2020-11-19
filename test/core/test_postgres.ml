@@ -9,6 +9,7 @@ module Util = struct
     Bytes.set_int32_be b 1 5l;
     Bytes.set b 5 'I';
     Bytes.to_string b
+  ;;
 
   let read_op =
     let fmt fmt t =
@@ -21,6 +22,7 @@ module Util = struct
       Fmt.string fmt m
     in
     Alcotest.testable fmt (fun a b -> a = b)
+  ;;
 
   let write_op_to_list = function
     | `Close _ -> [ "CLOSE" ]
@@ -31,6 +33,7 @@ module Util = struct
           let b = Bigstringaf.sub buffer ~off ~len in
           Bigstringaf.to_string b)
         iovecs
+  ;;
 
   let write_all conn =
     match Connection.next_write_operation conn with
@@ -39,11 +42,13 @@ module Util = struct
     | `Write iovecs ->
       let n = List.fold_left (fun acc { Faraday.len; _ } -> acc + len) 0 iovecs in
       `Ok n
+  ;;
 
   let string = Alcotest.testable Fmt.Dump.string String.equal
 
   let exn =
     Alcotest.testable Fmt.exn (fun e1 e2 -> Printexc.to_string e1 = Printexc.to_string e2)
+  ;;
 
   let read_frames frames conn =
     let msgs =
@@ -52,6 +57,7 @@ module Util = struct
     List.iter
       (fun msg -> Connection.read conn msg ~off:0 ~len:(Bigstringaf.length msg) |> ignore)
       msgs
+  ;;
 
   let login () =
     let user_info = Connection.User_info.make ~user:"test" ~password:"password" () in
@@ -69,6 +75,7 @@ module Util = struct
     read_frames messages conn;
     Alcotest.(check bool) "Login successful" true !auth_ok;
     conn
+  ;;
 end
 
 let test_startup_payload () =
@@ -88,6 +95,7 @@ let test_startup_payload () =
     "Encode message with database name"
     [ "\000\000\000'\000\003\000\000user\000test\000database\000mydatabase\000\000" ]
     (Util.write_op_to_list next_write_op)
+;;
 
 let test_md5_auth () =
   let user_info = Connection.User_info.make ~user:"test" ~password:"password" () in
@@ -109,6 +117,7 @@ let test_md5_auth () =
   let messages = [ "R\000\000\000\008\000\000\000\000"; Util.ready_for_query ] in
   Util.read_frames messages conn;
   Alcotest.(check bool) "Login successful" true !auth_ok
+;;
 
 let test_plain_auth () =
   let user_info = Connection.User_info.make ~user:"test" ~password:"password" () in
@@ -130,6 +139,7 @@ let test_plain_auth () =
   let messages = [ "R\000\000\000\008\000\000\000\000"; Util.ready_for_query ] in
   Util.read_frames messages conn;
   Alcotest.(check bool) "Login successful" true !auth_ok
+;;
 
 let test_prepare () =
   (* setup connection *)
@@ -176,6 +186,7 @@ let test_prepare () =
     "next read operation"
     `Yield
     (Connection.next_read_operation conn)
+;;
 
 let test_fetch_rows_with_error () =
   (* setup connection *)
@@ -226,6 +237,7 @@ let test_fetch_rows_with_error () =
     "Error handler triggering means read-for-query not called"
     false
     !finished
+;;
 
 let test_fetch_rows () =
   (* setup connection *)
@@ -265,6 +277,7 @@ let test_fetch_rows () =
     [ "baz", "bar"; "foo", "bar"; "bba", "bar" ]
     (Queue.to_seq out_rows |> List.of_seq);
   Alcotest.(check bool) "Execute finished" true !finished
+;;
 
 let tests =
   [ "startup", [ "encode startup message", `Quick, test_startup_payload ]
@@ -276,5 +289,6 @@ let tests =
       ; "fetch rows", `Quick, test_fetch_rows
       ] )
   ]
+;;
 
 let () = Alcotest.run "Postgres" tests

@@ -60,6 +60,7 @@ let create_ssl_options
   ; session
   ; verify_peer
   }
+;;
 
 let create_ssl opts r w handler =
   let open Async_ssl in
@@ -110,6 +111,7 @@ let create_ssl opts r w handler =
     in
     Monitor.protect ~here:[%here] ~name:"postgres_async.ssl" ~finally:shutdown (fun () ->
         handler reader writer)
+;;
 
 let request_ssl reader writer =
   let ssl_resp = Ivar.create () in
@@ -131,6 +133,7 @@ let request_ssl reader writer =
   in
   don't_wait_for (loop ());
   Ivar.read ssl_resp
+;;
 
 let fill_error ivar e =
   let err =
@@ -141,6 +144,7 @@ let fill_error ivar e =
     | `Postgres_error e -> Error.create_s ([%sexp_of: Backend.Error_response.t] e)
   in
   Ivar.fill_if_empty ivar (Error err)
+;;
 
 let connect user_info destination =
   let connected = Ivar.create () in
@@ -168,12 +172,14 @@ let connect user_info destination =
             | `Unavailable ->
               Error.raise_s [%message "Could not establish ssl connection"])));
   Ivar.read connected >>|? fun () -> conn
+;;
 
 let prepare ~statement ?(name = "") ?(oids = [||]) conn =
   let ivar = Ivar.create () in
   Connection.prepare conn ~statement ~name ~oids (fill_error ivar) (fun () ->
       Ivar.fill_if_empty ivar (Ok ()));
   Ivar.read ivar
+;;
 
 let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn =
   let ivar = Ivar.create () in
@@ -186,7 +192,9 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn
     (fill_error ivar)
     (fun () -> Ivar.fill_if_empty ivar (Ok ()));
   Ivar.read ivar
+;;
 
 let close conn =
   Connection.close conn;
   Deferred.return (Ok ())
+;;

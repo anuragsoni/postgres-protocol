@@ -34,4 +34,5 @@ module Md5 = struct
     let digest = Digest.string (hex ^ salt) in
     let hex = Digest.to_hex digest in
     Printf.sprintf "md5%s" hex
+  ;;
 end

@@ -9,12 +9,14 @@ let make_parameters ids =
          Caml.Bytes.set_int32_be b 0 id;
          Postgres.Frontend.Bind.make_param ~parameter:(Bytes.to_string b) `Binary ())
   |> Sequence.to_array
+;;
 
 let prepare_query name conn =
   Pg_async.prepare
     ~name
     ~statement:"SELECT id, email from users where id IN ($1, $2, $3)"
     conn
+;;
 
 let execute name conn ids =
   let parameters = make_parameters ids in
@@ -26,6 +28,7 @@ let execute name conn ids =
       | [ Some id; Some name ] -> Logs.info (fun m -> m "Id: %s and email: %s" id name)
       | _ -> assert false)
     conn
+;;
 
 let run host port user password database ssl =
   let%bind user =
@@ -56,6 +59,7 @@ let run host port user password database ssl =
   and () = execute name conn [ 78l; 11l; 6l ] in
   let%map () = Pg_async.close conn in
   Logs.info (fun m -> m "Finished")
+;;
 
 let command =
   Command.async
@@ -70,9 +74,11 @@ let command =
       and database = flag "-database" (optional string) ~doc:"string PGDATABASE"
       and ssl = flag "-ssl" (optional_with_default false bool) ~doc:"bool SSL" in
       fun () -> run host port user password database ssl |> Deferred.Or_error.ok_exn)
+;;
 
 let () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level ~all:true (Some Info);
   Fmt_tty.setup_std_outputs ();
   Command.run command
+;;
