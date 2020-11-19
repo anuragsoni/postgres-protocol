@@ -1,9 +1,9 @@
 open Mirage
 
 let packages =
-  [ package "postgres" ~pin:"../"
-  ; package "postgres-lwt" ~pin:"../"
-  ; package "postgres-mirage" ~pin:"../"
+  [ package "postgres" ~pin:"../../"
+  ; package "postgres-lwt" ~pin:"../../"
+  ; package "postgres-mirage" ~pin:"../../"
   ; package "logs"
   ; package "mirage-logs"
   ]
