@@ -36,7 +36,7 @@ type error =
 type t
 
 val connect
-  :  (Connection.t -> unit)
+  :  (Connection.runtime -> Connection.t -> unit)
   -> Connection.User_info.t
   -> (t, [> error ]) Lwt_result.t
 
