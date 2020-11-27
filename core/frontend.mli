@@ -26,33 +26,64 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
-open Postgres
+type protocol_version = V3_0 [@@deriving sexp_of]
 
-type error =
-  [ `Exn of exn
-  | `Msg of string
-  ]
+module Startup_message : sig
+  type t =
+    { user : string
+    ; database : string option
+    ; protocol_version : protocol_version
+    }
+  [@@deriving sexp_of]
 
-type t
+  val make : user:string -> ?database:string -> unit -> t
+end
 
-val connect
-  :  (Connection.t -> unit)
-  -> Connection.User_info.t
-  -> (t, [> error ]) Lwt_result.t
+module Password_message : sig
+  type t = Md5_or_plain of string
+end
 
-val prepare
-  :  statement:string
-  -> ?name:string
-  -> ?oids:Types.Oid.t array
-  -> t
-  -> (unit, [> error ]) Lwt_result.t
+module Parse : sig
+  type t =
+    { name : Types.Optional_string.t
+    ; statement : string
+    ; oids : Types.Oid.t Array.t
+    }
+end
 
-val execute
-  :  ?name:string
-  -> ?statement:string
-  -> ?parameters:(Types.Format_code.t * string option) array
-  -> (string option list -> unit)
-  -> t
-  -> (unit, [> error ]) Lwt_result.t
+module Bind : sig
+  type parameter =
+    { format_code : Types.Format_code.t
+    ; parameter : string option
+    }
 
-val close : t -> (unit, [> error ]) Lwt_result.t
+  val make_param : Types.Format_code.t -> ?parameter:string -> unit -> parameter
+
+  type t =
+    { destination : Types.Optional_string.t
+    ; statement : Types.Optional_string.t
+    ; parameters : parameter Array.t
+    ; result_formats : Types.Format_code.t Array.t
+    }
+
+  val make
+    :  ?destination:string
+    -> ?statement:string
+    -> ?parameters:parameter array
+    -> ?result_formats:Types.Format_code.t array
+    -> unit
+    -> t
+end
+
+module Execute : sig
+  type t =
+    { name : Types.Optional_string.t
+    ; max_rows : [ `Count of Types.Positive_int32.t | `Unlimited ]
+    }
+
+  val make
+    :  ?name:string
+    -> [ `Count of Types.Positive_int32.t | `Unlimited ]
+    -> unit
+    -> t
+end

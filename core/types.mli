@@ -26,33 +26,56 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
-open Postgres
+module Process_id : sig
+  type t [@@deriving sexp_of]
 
-type error =
-  [ `Exn of exn
-  | `Msg of string
-  ]
+  val to_int32 : t -> int32
+  val of_int32 : int32 -> t option
+  val of_int32_exn : int32 -> t
+end
 
-type t
+module Statement_or_portal : sig
+  type t =
+    | Statement
+    | Portal
+  [@@deriving sexp_of]
 
-val connect
-  :  (Connection.t -> unit)
-  -> Connection.User_info.t
-  -> (t, [> error ]) Lwt_result.t
+  val to_char : t -> char
+  val of_char : char -> t
+end
 
-val prepare
-  :  statement:string
-  -> ?name:string
-  -> ?oids:Types.Oid.t array
-  -> t
-  -> (unit, [> error ]) Lwt_result.t
+module Positive_int32 : sig
+  type t [@@deriving sexp_of]
 
-val execute
-  :  ?name:string
-  -> ?statement:string
-  -> ?parameters:(Types.Format_code.t * string option) array
-  -> (string option list -> unit)
-  -> t
-  -> (unit, [> error ]) Lwt_result.t
+  val of_int32_exn : int32 -> t
+  val to_int32 : t -> int32
+end
 
-val close : t -> (unit, [> error ]) Lwt_result.t
+module Optional_string : sig
+  type t [@@deriving sexp_of]
+
+  val empty : t
+  val of_string : string -> t
+  val to_string : t -> string
+  val is_empty : t -> bool
+  val length : t -> int
+end
+
+module Oid : sig
+  type t [@@deriving sexp_of]
+
+  val of_int32 : int32 -> t
+  val of_int_exn : int -> t
+  val to_int32 : t -> int32
+end
+
+module Format_code : sig
+  type t =
+    [ `Binary
+    | `Text
+    ]
+  [@@deriving sexp_of]
+
+  val of_int : int -> [> `Binary | `Text ] option
+  val to_int : [< `Binary | `Text ] -> int
+end

@@ -26,7 +26,9 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
+open Import
 open Types
+module Frontend = Frontend0
 
 exception Auth_method_not_implemented of string
 
@@ -249,6 +251,11 @@ let execute
   conn.state <- Execute;
   conn.on_error <- on_error;
   conn.on_data_row <- on_data_row;
+  let parameters =
+    Array.map
+      (fun (format_code, parameter) -> Frontend.Bind.make_param format_code ?parameter ())
+      parameters
+  in
   let b = Frontend.Bind.make ~destination:name ~statement ~parameters () in
   let e = Frontend.Execute.make ~name `Unlimited () in
   Serializer.bind conn.writer b;
