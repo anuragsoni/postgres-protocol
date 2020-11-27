@@ -52,6 +52,18 @@ let wakeup_exn p w err =
 
 let wakeup_if_empty p w r = if Lwt.is_sleeping p then Lwt.wakeup_later w r else ()
 
+module Throttle = struct
+  type 'a t =
+    { mutex : Lwt_mutex.t
+    ; conn : 'a
+    }
+
+  let create conn = { conn; mutex = Lwt_mutex.create () }
+  let enqueue t f = Lwt_mutex.with_lock t.mutex (fun () -> f t.conn)
+end
+
+type t = Connection.t Throttle.t
+
 let connect run user_info =
   let finished, wakeup = Lwt.wait () in
   let conn =
@@ -59,17 +71,22 @@ let connect run user_info =
         wakeup_if_empty finished wakeup (Ok ()))
   in
   run conn;
-  finished >>|? fun () -> conn
+  let t = Throttle.create conn in
+  finished >>|? fun () -> t
 ;;
 
-let prepare ~statement ?(name = "") ?(oids = [||]) conn =
+let prepare ~statement ?(name = "") ?(oids = [||]) t =
+  Throttle.enqueue t
+  @@ fun conn ->
   let finished, wakeup = Lwt.wait () in
   Connection.prepare conn ~statement ~name ~oids (wakeup_exn finished wakeup) (fun () ->
       wakeup_if_empty finished wakeup (Ok ()));
   finished
 ;;
 
-let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn =
+let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row t =
+  Throttle.enqueue t
+  @@ fun conn ->
   let finished, wakeup = Lwt.wait () in
   Connection.execute
     conn
@@ -82,7 +99,9 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn
   finished
 ;;
 
-let close conn =
+let close t =
+  Throttle.enqueue t
+  @@ fun conn ->
   Connection.close conn;
   Lwt_result.return ()
 ;;

@@ -54,7 +54,7 @@ type mode =
   | Parse
   | Execute
 
-type conn =
+type t =
   { user_info : User_info.t
   ; backend_key_data : Backend.Backend_key_data.t option
   ; reader : Parser.t
@@ -68,105 +68,35 @@ type conn =
   }
 
 let is_conn_closed conn = Parser.is_closed conn.reader && Serializer.is_closed conn.writer
-
-module Sequencer = struct
-  type job =
-    { run : conn -> unit
-    ; cancel : error -> unit
-    }
-
-  type t =
-    { conn : conn
-    ; queue : job Queue.t
-    }
-
-  let conn t = t.conn
-  let create conn = { conn; queue = Queue.create () }
-
-  let enqueue t on_error run =
-    Logger.debug (fun m -> m "sequencer enqueue");
-    if is_conn_closed t.conn
-    then on_error (`Msg "Connection closed")
-    else
-      Queue.push
-        { run =
-            (fun conn ->
-              conn.on_error <- on_error;
-              run conn)
-        ; cancel = on_error
-        }
-        t.queue
-  ;;
-
-  let shutdown t =
-    Queue.iter (fun { cancel; _ } -> cancel (`Msg "Connection closed")) t.queue;
-    Queue.clear t.queue
-  ;;
-
-  let is_empty t = Queue.is_empty t.queue
-
-  let advance_if_needed t =
-    match Queue.peek_opt t.queue with
-    | None ->
-      Logger.debug (fun m -> m "no advance");
-      ()
-    | Some _ ->
-      Logger.debug (fun m -> m "advance");
-      if t.conn.running_operation
-      then ()
-      else (
-        let op = Queue.take t.queue in
-        t.conn.running_operation <- true;
-        op.run t.conn)
-  ;;
-end
-
-type t = Sequencer.t
-
-let next_write_operation t =
-  Sequencer.advance_if_needed t;
-  Serializer.next_operation (Sequencer.conn t).writer
-;;
-
-let next_read_operation t =
-  Sequencer.advance_if_needed t;
-  if Sequencer.is_empty t && (Sequencer.conn t).running_operation = false
-  then `Yield
-  else Parser.next_action (Sequencer.conn t).reader
-;;
+let next_write_operation t = Serializer.next_operation t.writer
+let next_read_operation t = Parser.next_action t.reader
 
 let read t buf ~off ~len =
-  Parser.feed (Sequencer.conn t).reader ~buf ~off ~len Angstrom.Unbuffered.Incomplete
+  Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Incomplete
 ;;
 
 let read_eof t buf ~off ~len =
-  Parser.feed (Sequencer.conn t).reader ~buf ~off ~len Angstrom.Unbuffered.Complete
+  Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Complete
 ;;
 
 let yield_reader t thunk =
-  if is_conn_closed (Sequencer.conn t)
+  if is_conn_closed t
   then failwith "Connection is closed"
-  else if Option.is_some (Sequencer.conn t).wakeup_reader
+  else if Option.is_some t.wakeup_reader
   then failwith "Only one callback can be registered at a time"
-  else (Sequencer.conn t).wakeup_reader <- Some thunk
+  else t.wakeup_reader <- Some thunk
 ;;
 
-let wakeup_reader t =
-  let conn = Sequencer.conn t in
+let wakeup_reader conn =
   let thunk = conn.wakeup_reader in
   conn.wakeup_reader <- None;
   Option.iter (fun t -> t ()) thunk
 ;;
 
-let yield_writer t thunk = Serializer.yield_writer (Sequencer.conn t).writer thunk
+let yield_writer t thunk = Serializer.yield_writer t.writer thunk
+let report_write_result t res = Serializer.report_write_result t.writer res
 
-let report_write_result t res =
-  Serializer.report_write_result (Sequencer.conn t).writer res
-;;
-
-let shutdown conn =
-  let t = Sequencer.conn conn in
-  Sequencer.shutdown conn;
+let shutdown t =
   Parser.force_close t.reader;
   Serializer.close_and_drain t.writer;
   Serializer.wakeup_writer t.writer
@@ -174,7 +104,7 @@ let shutdown conn =
 
 let report_exn t exn =
   shutdown t;
-  (Sequencer.conn t).on_error (`Exn exn)
+  t.on_error (`Exn exn)
 ;;
 
 let handle_auth_message t msg =
@@ -283,36 +213,31 @@ let connect user_info on_error finish =
       }
   in
   let t' = Lazy.force t in
-  let conn = Sequencer.create t' in
-  (Sequencer.enqueue conn on_error
-  @@ fun t ->
   Logger.debug (fun m -> m "startup");
   let startup_message =
     Frontend.Startup_message.make ~user:user_info.user ?database:user_info.database ()
   in
-  Serializer.startup t.writer startup_message;
-  Serializer.wakeup_writer t.writer);
-  wakeup_reader conn;
-  conn
+  Serializer.startup t'.writer startup_message;
+  Serializer.wakeup_writer t'.writer;
+  wakeup_reader t';
+  t'
 ;;
 
-let prepare t ~statement ?(name = "") ?(oids = [||]) on_error finish =
-  (Sequencer.enqueue t on_error
-  @@ fun conn ->
+let prepare conn ~statement ?(name = "") ?(oids = [||]) on_error finish =
   Logger.debug (fun m -> m "prepare");
   conn.ready_for_query <- finish;
+  conn.on_error <- on_error;
   conn.state <- Parse;
   let prepare =
     { Frontend.Parse.name = Optional_string.of_string name; statement; oids }
   in
   Serializer.parse conn.writer prepare;
   Serializer.sync conn.writer;
-  Serializer.wakeup_writer conn.writer);
-  wakeup_reader t
+  Serializer.wakeup_writer conn.writer
 ;;
 
 let execute
-    t
+    conn
     ?(name = "")
     ?(statement = "")
     ?(parameters = [||])
@@ -320,24 +245,19 @@ let execute
     on_error
     finish
   =
-  (Sequencer.enqueue t on_error
-  @@ fun conn ->
   conn.ready_for_query <- finish;
   conn.state <- Execute;
+  conn.on_error <- on_error;
   conn.on_data_row <- on_data_row;
   let b = Frontend.Bind.make ~destination:name ~statement ~parameters () in
   let e = Frontend.Execute.make ~name `Unlimited () in
   Serializer.bind conn.writer b;
   Serializer.execute conn.writer e;
   Serializer.sync conn.writer;
-  Serializer.wakeup_writer conn.writer);
-  wakeup_reader t
+  Serializer.wakeup_writer conn.writer
 ;;
 
-let close t =
-  (Sequencer.enqueue t (fun _ -> ())
-  @@ fun conn ->
+let close conn =
   Serializer.terminate conn.writer;
-  shutdown t);
-  wakeup_reader t
+  shutdown conn
 ;;
