@@ -1,5 +1,0 @@
-(executable
- (name main)
- (preprocess
-  (pps ppx_jane))
- (libraries core async pg-async logs.fmt fmt.tty))

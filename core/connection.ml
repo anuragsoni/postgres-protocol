@@ -61,7 +61,6 @@ type t =
   ; backend_key_data : Backend.Backend_key_data.t option
   ; reader : Parser.t
   ; writer : Serializer.t
-  ; mutable wakeup_reader : (unit -> unit) option
   ; mutable on_error : error_handler
   ; mutable state : mode
   ; mutable ready_for_query : unit -> unit
@@ -69,45 +68,37 @@ type t =
   ; mutable running_operation : bool
   }
 
-let is_conn_closed conn = Parser.is_closed conn.reader && Serializer.is_closed conn.writer
-let next_write_operation t = Serializer.next_operation t.writer
-let next_read_operation t = Parser.next_action t.reader
+module Runtime = struct
+  type nonrec t = t
 
-let read t buf ~off ~len =
-  Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Incomplete
-;;
+  let next_write_operation t = Serializer.next_operation t.writer
+  let next_read_operation t = Parser.next_action t.reader
 
-let read_eof t buf ~off ~len =
-  Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Complete
-;;
+  let read t buf ~off ~len =
+    Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Incomplete
+  ;;
 
-let yield_reader t thunk =
-  if is_conn_closed t
-  then failwith "Connection is closed"
-  else if Option.is_some t.wakeup_reader
-  then failwith "Only one callback can be registered at a time"
-  else t.wakeup_reader <- Some thunk
-;;
+  let read_eof t buf ~off ~len =
+    Parser.feed t.reader ~buf ~off ~len Angstrom.Unbuffered.Complete
+  ;;
 
-let wakeup_reader conn =
-  let thunk = conn.wakeup_reader in
-  conn.wakeup_reader <- None;
-  Option.iter (fun t -> t ()) thunk
-;;
+  let yield_reader _t thunk = thunk ()
+  let yield_writer t thunk = Serializer.yield_writer t.writer thunk
+  let report_write_result t res = Serializer.report_write_result t.writer res
 
-let yield_writer t thunk = Serializer.yield_writer t.writer thunk
-let report_write_result t res = Serializer.report_write_result t.writer res
+  let shutdown t =
+    Parser.force_close t.reader;
+    Serializer.close_and_drain t.writer;
+    Serializer.wakeup_writer t.writer
+  ;;
 
-let shutdown t =
-  Parser.force_close t.reader;
-  Serializer.close_and_drain t.writer;
-  Serializer.wakeup_writer t.writer
-;;
+  let report_exn t exn =
+    shutdown t;
+    t.on_error (`Exn exn)
+  ;;
+end
 
-let report_exn t exn =
-  shutdown t;
-  t.on_error (`Exn exn)
-;;
+type runtime = (module Runtime_intf.S with type t = t)
 
 let handle_auth_message t msg =
   let r msg = raise @@ Auth_method_not_implemented msg in
@@ -196,10 +187,13 @@ let handle_message' t msg =
     | Execute -> handle_execute t msg)
 ;;
 
-let connect user_info on_error finish =
+let connect driver user_info on_error finish =
   let rec handle_message msg =
     let t = Lazy.force t in
     handle_message' t msg
+  and on_finish () =
+    let t = Lazy.force t in
+    finish t
   and t =
     lazy
       { user_info
@@ -208,21 +202,19 @@ let connect user_info on_error finish =
       ; reader = Parser.create Backend.parse handle_message
       ; writer = Serializer.create ()
       ; state = Connect
-      ; ready_for_query = finish
+      ; ready_for_query = on_finish
       ; on_data_row = (fun _ -> ())
-      ; wakeup_reader = None
       ; running_operation = false
       }
   in
   let t' = Lazy.force t in
+  driver (module Runtime : Runtime_intf.S with type t = t) t';
   Logger.debug (fun m -> m "startup");
   let startup_message =
     Frontend.Startup_message.make ~user:user_info.user ?database:user_info.database ()
   in
   Serializer.startup t'.writer startup_message;
-  Serializer.wakeup_writer t'.writer;
-  wakeup_reader t';
-  t'
+  Serializer.wakeup_writer t'.writer
 ;;
 
 let prepare conn ~statement ?(name = "") ?(oids = [||]) on_error finish =
@@ -266,5 +258,5 @@ let execute
 
 let close conn =
   Serializer.terminate conn.writer;
-  shutdown conn
+  Runtime.shutdown conn
 ;;

@@ -39,16 +39,14 @@ type destination =
   | Ipv4 of Ipaddr.V4.t * int
 
 module Make_io (FLOW : Mirage_flow.S) = struct
-  open Postgres
-
-  let run flow conn =
+  let run
+      : type t. FLOW.flow -> (module Postgres.Runtime_intf.S with type t = t) -> t -> unit
+    =
+   fun flow (module Connection) conn ->
     let read_loop_finish, notify_read_loop_finish = Lwt.wait () in
-    let rec read_loop () =
+    let read_loop () =
       let rec aux () =
         match Connection.next_read_operation conn with
-        | `Yield ->
-          Connection.yield_reader conn read_loop;
-          Lwt.return_unit
         | `Close ->
           Lwt.wakeup_later notify_read_loop_finish ();
           FLOW.close flow
@@ -113,7 +111,7 @@ module Make_io (FLOW : Mirage_flow.S) = struct
     write_loop ();
     Lwt.async (fun () ->
         Lwt.join [ read_loop_finish; write_loop_finish ] >>= fun () -> FLOW.close flow)
-  ;;
+ ;;
 end
 
 module Make

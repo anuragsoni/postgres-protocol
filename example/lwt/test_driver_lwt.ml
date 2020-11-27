@@ -1,12 +1,10 @@
-open! Core
-
 let make_parameters ids =
-  Sequence.of_list ids
-  |> Sequence.map ~f:(fun id ->
+  List.to_seq ids
+  |> Seq.map (fun id ->
          let b = Bytes.create 4 in
          Caml.Bytes.set_int32_be b 0 id;
          `Binary, Some (Bytes.to_string b))
-  |> Sequence.to_array
+  |> Array.of_seq
 ;;
 
 let prepare_query name conn =
@@ -63,27 +61,51 @@ let run host port user password database ssl =
   >>= fun conn -> execute conn
 ;;
 
-let command =
-  Command.basic
-    ~summary:"Hello Postgres"
-    Command.Param.(
-      let open Command.Let_syntax in
-      let%map port = flag "-port" (optional_with_default 5432 int) ~doc:"int PGPORT"
-      and host =
-        flag "-host" (optional_with_default "localhost" string) ~doc:"string PGHOST"
-      and user = flag "-user" (optional string) ~doc:"string PGUSER"
-      and password =
-        flag "-password" (optional_with_default "" string) ~doc:"string PGPASSWORD"
-      and database = flag "-database" (optional string) ~doc:"string PGDATABASE"
-      and ssl = flag "-ssl" (optional_with_default false bool) ~doc:"bool SSL" in
-      fun () ->
-        Lwt_main.run
-        @@
-        let open Lwt.Infix in
-        match%bind run host port user password database ssl with
-        | Ok () -> Lwt.return ()
-        | Error (`Exn exn) -> Lwt.fail exn
-        | Error (`Msg msg) -> Lwt.fail_with msg)
+let cmd =
+  let open Cmdliner in
+  let port =
+    let doc = "port number for the postgres server" in
+    Arg.(value & opt int 5432 & info [ "p"; "port" ] ~doc)
+  in
+  let host =
+    let doc = "hostname for the postgres server" in
+    Arg.(value & opt string "localhost" & info [ "host" ] ~doc)
+  in
+  let user =
+    let doc = "postgres user" in
+    Arg.(value & opt (some string) None & info [ "user" ] ~doc)
+  in
+  let password =
+    let doc = "postgres password" in
+    Arg.(value & opt string "" & info [ "password" ] ~doc)
+  in
+  let database =
+    let doc = "postgres database" in
+    Arg.(value & opt (some string) None & info [ "database" ] ~doc)
+  in
+  let ssl =
+    let doc = "setup a tls encrypted connection" in
+    Arg.(value & flag & info [ "ssl" ] ~doc)
+  in
+  let doc = "Postgres example" in
+  let term = Term.(const run $ host $ port $ user $ password $ database $ ssl) in
+  term, Term.info "postgres_lwt" ~doc
+;;
+
+let run_cmd cmd =
+  let open Cmdliner in
+  let open Lwt.Infix in
+  match Term.eval cmd with
+  | `Ok res ->
+    let p =
+      res
+      >>= function
+      | Ok () -> Lwt.return ()
+      | Error (`Exn exn) -> Lwt.fail exn
+      | Error (`Msg msg) -> Lwt.fail_with msg
+    in
+    Lwt_main.run p
+  | _ -> exit 1
 ;;
 
 let () = Mirage_crypto_rng_unix.initialize ()
@@ -92,5 +114,5 @@ let () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level ~all:true (Some Info);
   Fmt_tty.setup_std_outputs ();
-  Command.run command
+  run_cmd cmd
 ;;

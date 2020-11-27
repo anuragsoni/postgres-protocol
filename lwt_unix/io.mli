@@ -4,4 +4,4 @@ module Socket : sig
     | Tls of Tls_lwt.Unix.t
 end
 
-val run : Socket.t -> Postgres.Connection.t -> unit
+val run : Socket.t -> Postgres.Connection.runtime -> Postgres.Connection.t -> unit

@@ -64,15 +64,11 @@ end
 
 type t = Connection.t Throttle.t
 
-let connect run user_info =
+let connect driver user_info =
   let finished, wakeup = Lwt.wait () in
-  let conn =
-    Connection.connect user_info (wakeup_exn finished wakeup) (fun () ->
-        wakeup_if_empty finished wakeup (Ok ()))
-  in
-  run conn;
-  let t = Throttle.create conn in
-  finished >>|? fun () -> t
+  Connection.connect driver user_info (wakeup_exn finished wakeup) (fun t ->
+      wakeup_if_empty finished wakeup (Ok t));
+  finished >>|? fun conn -> Throttle.create conn
 ;;
 
 let prepare ~statement ?(name = "") ?(oids = [||]) t =

@@ -74,20 +74,3 @@
   tls-mirage
   lwt))
 
-(package
- (name pg-async)
- (tags
-  (postgres postgresql mirage))
- (depends
-  (async
-   (>= "v0.13.0"))
-  (async_ssl
-   (>= "v0.13.0"))
-  (core
-   (>= "v0.13.0"))
-  (ocaml
-   (>= 4.08))
-  (postgres
-   (= :version))
-  (ppx_jane
-   (>= "v0.13.0"))))

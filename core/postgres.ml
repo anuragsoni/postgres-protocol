@@ -27,6 +27,7 @@
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
 open Import
+
 let log_src = Logger.src
 
 module Types = Types
@@ -34,3 +35,4 @@ module Frontend = Frontend
 module Backend = Backend
 module Request_ssl = Request_ssl
 module Connection = Connection
+module Runtime_intf = Runtime_intf

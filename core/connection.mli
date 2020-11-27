@@ -19,8 +19,14 @@ type error =
 
 type error_handler = error -> unit
 type t
+type runtime = (module Runtime_intf.S with type t = t)
 
-val connect : User_info.t -> error_handler -> (unit -> unit) -> t
+val connect
+  :  (runtime -> t -> unit)
+  -> User_info.t
+  -> error_handler
+  -> (t -> unit)
+  -> unit
 
 val prepare
   :  t
@@ -42,15 +48,3 @@ val execute
   -> unit
 
 val close : t -> unit
-
-val next_write_operation
-  :  t
-  -> [> `Close of int | `Write of Faraday.bigstring Faraday.iovec list | `Yield ]
-
-val next_read_operation : t -> [> `Close | `Read | `Yield ]
-val read : t -> Angstrom.bigstring -> off:int -> len:int -> int
-val read_eof : t -> Angstrom.bigstring -> off:int -> len:int -> int
-val yield_reader : t -> (unit -> unit) -> unit
-val report_write_result : t -> [< `Closed | `Ok of int ] -> unit
-val report_exn : t -> exn -> unit
-val yield_writer : t -> (unit -> unit) -> unit
