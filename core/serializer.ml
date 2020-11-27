@@ -83,13 +83,13 @@ let write_ident_only ident t =
   Faraday.BE.write_uint32 t.writer 4l
 ;;
 
-let startup t msg = write (module Frontend.Startup_message) msg t
-let password t msg = write (module Frontend.Password_message) msg t
-let parse t msg = write (module Frontend.Parse) msg t
-let bind t msg = write (module Frontend.Bind) msg t
-let execute t msg = write (module Frontend.Execute) msg t
-let sync t = write_ident_only Frontend.sync t
-let terminate t = write_ident_only Frontend.terminate t
+let startup t msg = write (module Frontend0.Startup_message) msg t
+let password t msg = write (module Frontend0.Password_message) msg t
+let parse t msg = write (module Frontend0.Parse) msg t
+let bind t msg = write (module Frontend0.Bind) msg t
+let execute t msg = write (module Frontend0.Execute) msg t
+let sync t = write_ident_only Frontend0.sync t
+let terminate t = write_ident_only Frontend0.terminate t
 
 let next_operation t =
   match Faraday.operation t.writer with

@@ -57,7 +57,7 @@ val prepare
 val execute
   :  ?name:string
   -> ?statement:string
-  -> ?parameters:Frontend.Bind.parameter array
+  -> ?parameters:(Types.Format_code.t * string option) array
   -> (string option list -> unit)
   -> t
   -> unit Deferred.Or_error.t

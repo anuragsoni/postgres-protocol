@@ -26,33 +26,6 @@
    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
-open Postgres
-
-type error =
-  [ `Exn of exn
-  | `Msg of string
-  ]
-
-type t
-
-val connect
-  :  (Connection.t -> unit)
-  -> Connection.User_info.t
-  -> (t, [> error ]) Lwt_result.t
-
-val prepare
-  :  statement:string
-  -> ?name:string
-  -> ?oids:Types.Oid.t array
-  -> t
-  -> (unit, [> error ]) Lwt_result.t
-
-val execute
-  :  ?name:string
-  -> ?statement:string
-  -> ?parameters:(Types.Format_code.t * string option) array
-  -> (string option list -> unit)
-  -> t
-  -> (unit, [> error ]) Lwt_result.t
-
-val close : t -> (unit, [> error ]) Lwt_result.t
+module Md5 : sig
+  val hash : username:string -> password:string -> salt:string -> string
+end
