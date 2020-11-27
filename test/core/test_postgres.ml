@@ -11,7 +11,7 @@ module Util = struct
     Bytes.to_string b
   ;;
 
-  let read_op =
+  let read_op : [ `Close | `Read | `Yield ] Alcotest.testable =
     let fmt fmt t =
       let m =
         match t with
@@ -144,9 +144,6 @@ let test_plain_auth () =
 let test_prepare () =
   (* setup connection *)
   let conn = Util.login () in
-  (* We will attempt to prepare two queries, but call them in a manner where the second
-     query is scheduled before the first one has had a time to finish The query sequencer
-     that's part of the core module should ensure that the two requests run sequentially. *)
   let prepared = Queue.create () in
   Connection.prepare
     conn
@@ -156,36 +153,12 @@ let test_prepare () =
   let res = Util.write_all conn in
   Connection.report_write_result conn res;
   Alcotest.(check bool) "prepare transaction not finished" true (Queue.is_empty prepared);
-  (* enqueue the second prepare request *)
-  Connection.prepare
-    conn
-    ~statement:"SELECT * FROM USERS WHERE ID = $1"
-    default_error_handler
-    (fun () -> Queue.push 2 prepared);
-  (* postgres operates on queries in sequence. The response for the first query arrives
-     first. *)
   let messages = [ "1\000\000\000\004"; Util.ready_for_query ] in
   Util.read_frames messages conn;
   Alcotest.(check (list int))
     "First query finished"
     [ 1 ]
-    (Queue.to_seq prepared |> List.of_seq);
-  (* ensure that we are still looking to read more *)
-  Alcotest.(check Util.read_op)
-    "next read operation"
-    `Read
-    (Connection.next_read_operation conn);
-  (* the response for the second query is similar since it was also a parse request *)
-  Util.read_frames messages conn;
-  Alcotest.(check (list int))
-    "Second query finished"
-    [ 1; 2 ]
-    (Queue.to_seq prepared |> List.of_seq);
-  (* we received responses for both queries, so next read operations is yield *)
-  Alcotest.(check Util.read_op)
-    "next read operation"
-    `Yield
-    (Connection.next_read_operation conn)
+    (Queue.to_seq prepared |> List.of_seq)
 ;;
 
 let test_fetch_rows_with_error () =

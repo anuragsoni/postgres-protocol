@@ -33,16 +33,18 @@ type error =
   | `Msg of string
   ]
 
+type t
+
 val connect
   :  (Connection.t -> unit)
   -> Connection.User_info.t
-  -> (Connection.t, [> error ]) Lwt_result.t
+  -> (t, [> error ]) Lwt_result.t
 
 val prepare
   :  statement:string
   -> ?name:string
   -> ?oids:Types.Oid.t array
-  -> Connection.t
+  -> t
   -> (unit, [> error ]) Lwt_result.t
 
 val execute
@@ -50,7 +52,7 @@ val execute
   -> ?statement:string
   -> ?parameters:Frontend.Bind.parameter array
   -> (string option list -> unit)
-  -> Connection.t
+  -> t
   -> (unit, [> error ]) Lwt_result.t
 
-val close : Connection.t -> (unit, [> error ]) Lwt_result.t
+val close : t -> (unit, [> error ]) Lwt_result.t

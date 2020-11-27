@@ -43,13 +43,15 @@ val create_ssl_options
   -> unit
   -> ssl_options
 
-val connect : Connection.User_info.t -> Destination.t -> Connection.t Deferred.Or_error.t
+type t
+
+val connect : Connection.User_info.t -> Destination.t -> t Deferred.Or_error.t
 
 val prepare
   :  statement:string
   -> ?name:string
   -> ?oids:Types.Oid.t array
-  -> Connection.t
+  -> t
   -> unit Deferred.Or_error.t
 
 val execute
@@ -57,7 +59,7 @@ val execute
   -> ?statement:string
   -> ?parameters:Frontend.Bind.parameter array
   -> (string option list -> unit)
-  -> Connection.t
+  -> t
   -> unit Deferred.Or_error.t
 
-val close : Postgres.Connection.t -> unit Deferred.Or_error.t
+val close : t -> unit Deferred.Or_error.t

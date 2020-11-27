@@ -146,6 +146,8 @@ let fill_error ivar e =
   Ivar.fill_if_empty ivar (Error err)
 ;;
 
+type t = Connection.t Sequencer.t
+
 let connect user_info destination =
   let connected = Ivar.create () in
   let conn =
@@ -171,17 +173,22 @@ let connect user_info destination =
             | `Available -> create_ssl ssl_options r w handler
             | `Unavailable ->
               Error.raise_s [%message "Could not establish ssl connection"])));
-  Ivar.read connected >>|? fun () -> conn
+  let t = Sequencer.create conn in
+  Ivar.read connected >>|? fun () -> t
 ;;
 
-let prepare ~statement ?(name = "") ?(oids = [||]) conn =
+let prepare ~statement ?(name = "") ?(oids = [||]) t =
+  Throttle.enqueue t
+  @@ fun conn ->
   let ivar = Ivar.create () in
   Connection.prepare conn ~statement ~name ~oids (fill_error ivar) (fun () ->
       Ivar.fill_if_empty ivar (Ok ()));
   Ivar.read ivar
 ;;
 
-let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn =
+let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row t =
+  Throttle.enqueue t
+  @@ fun conn ->
   let ivar = Ivar.create () in
   Connection.execute
     conn
@@ -194,7 +201,9 @@ let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row conn
   Ivar.read ivar
 ;;
 
-let close conn =
+let close t =
+  Throttle.enqueue t
+  @@ fun conn ->
   Connection.close conn;
   Deferred.return (Ok ())
 ;;
