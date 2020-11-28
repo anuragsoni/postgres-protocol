@@ -42,14 +42,74 @@ module User_info = struct
   let make ~user ?(password = "") ?database () = { user; password; database }
 end
 
-type error =
-  [ `Exn of exn
-  | `Msg of string
-  | `Postgres_error of Backend.Error_response.t
-  | `Parse_error of string
-  ]
+module Error = struct
+  (* Error type based on Janestreet's Base.Error.t
+     https://github.com/janestreet/base/blob/25e68e4a33c8339d95cb7e89485410d9be7f8771/src/info.ml
 
-type error_handler = error -> unit
+     The MIT License
+
+     Copyright (c) 2016--2020 Jane Street Group, LLC <opensource@janestreet.com>
+
+     Permission is hereby granted, free of charge, to any person obtaining a copy of this
+     software and associated documentation files (the "Software"), to deal in the Software
+     without restriction, including without limitation the rights to use, copy, modify,
+     merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+     permit persons to whom the Software is furnished to do so, subject to the following
+     conditions:
+
+     The above copyright notice and this permission notice shall be included in all copies
+     or substantial portions of the Software.
+
+     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+     INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+     PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+     CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+     OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. *)
+  open Sexplib0.Sexp_conv
+
+  module Kind = struct
+    type t =
+      | Exn of exn
+      | Msg of string
+      | Postgres_error of Backend.Error_response.t
+    [@@deriving sexp_of]
+  end
+
+  type t = Kind.t Lazy.t
+
+  exception Exn of Kind.t
+
+  (* Register a pretty printer for exceptions raised via Error module. Without this the
+     user would see [Fatal error: exception Error.Exn(_)]. With the printer we will
+     instead see a sexp formatted message. *)
+  let () =
+    Printexc.register_printer (function
+        | Exn t -> Some (Sexplib0.Sexp.to_string_hum (Kind.sexp_of_t t))
+        | _ -> None)
+  ;;
+
+  let of_exn exn = Lazy.from_val (Kind.Exn exn)
+  let of_string msg = Lazy.from_val (Kind.Msg msg)
+  let of_pg_err err = Lazy.from_val (Kind.Postgres_error err)
+  let failf fmt = Format.kasprintf (fun v -> Error (of_string v)) fmt
+
+  let sexp_of_t t =
+    let kind = Lazy.force t in
+    Kind.sexp_of_t kind
+  ;;
+
+  let to_exn t =
+    let kind = Lazy.force t in
+    match kind with
+    | Kind.Exn exn -> raise exn
+    | t -> raise (Exn t)
+  ;;
+
+  let raise t = raise (to_exn t)
+end
+
+type error_handler = Error.t -> unit
 
 type mode =
   | Connect
@@ -94,7 +154,7 @@ module Runtime = struct
 
   let report_exn t exn =
     shutdown t;
-    t.on_error (`Exn exn)
+    t.on_error (Error.of_exn exn)
   ;;
 end
 
@@ -173,13 +233,13 @@ let handle_execute t msg =
             "Exception raised in the user provided row handler, discarding all future \
              data-rows.");
       t.on_data_row <- (fun _ -> ());
-      t.ready_for_query <- (fun () -> t.on_error (`Exn exn)))
+      t.ready_for_query <- (fun () -> t.on_error (Error.of_exn exn)))
   | _ -> ()
 ;;
 
 let handle_message' t msg =
   match msg with
-  | Backend.ErrorResponse e -> t.on_error (`Postgres_error e)
+  | Backend.ErrorResponse e -> t.on_error (Error.of_pg_err e)
   | _ ->
     (match t.state with
     | Connect -> handle_connect t msg

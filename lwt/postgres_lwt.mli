@@ -27,10 +27,4 @@
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
 open Postgres
-
-type error =
-  [ `Exn of exn
-  | `Msg of string
-  ]
-
-include Connection.S with type 'a future := ('a, error) Lwt_result.t
+include Connection.S with type 'a future := ('a, Connection.Error.t) Lwt_result.t

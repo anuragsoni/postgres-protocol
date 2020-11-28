@@ -4,6 +4,7 @@ let ( >>| ) = Lwt.( >|= )
 let src = Logs.Src.create "postgres.lwt.unix"
 
 module Log = (val Logs.src_log src : Logs.LOG)
+module Error = Postgres.Connection.Error
 
 type destination =
   | Unix_domain of string
@@ -14,7 +15,7 @@ let connect_inet host port =
   >>= fun addr_info ->
   let rec run xs =
     match xs with
-    | [] -> Lwt_result.fail (`Msg "Could not create socket connection")
+    | [] -> Lwt_result.fail (Error.of_string "Could not create socket connection")
     | x :: xs ->
       Lwt.catch
         (fun () ->
@@ -53,11 +54,11 @@ let request_ssl socket =
       | n ->
         Lwt.wakeup_later
           wakeup_ssl_avail
-          (Error (`Msg (Printf.sprintf "Expecting 1 byte, but received: %d" n)));
+          (Error (Error.of_string (Printf.sprintf "Expecting 1 byte, but received: %d" n)));
         Lwt.return_unit)
     | `Stop -> Lwt.return_unit
     | `Fail msg ->
-      Lwt.wakeup_later wakeup_ssl_avail (Error (`Msg msg));
+      Lwt.wakeup_later wakeup_ssl_avail (Error (Error.of_string msg));
       Lwt.return_unit
   in
   Lwt.async (fun () -> loop ());
@@ -82,12 +83,12 @@ let connect ?tls_config user_info destination =
           Tls_lwt.Unix.client_of_fd config socket >>| fun s -> Ok (Io.Socket.Tls s)
         | `Unavailable ->
           Lwt_result.fail
-            (`Msg
-              "Requested a ssl connection, but the postgres server doesn't support \
-               connecting over ssl.")))
+            (Error.of_string
+               "Requested a ssl connection, but the postgres server doesn't support \
+                connecting over ssl.")))
       >>=? fun socket -> Postgres_lwt.connect (Io.run socket) user_info)
     (fun exn ->
       Log.err (fun m ->
           m "Could not create postgres connection. %s" (Printexc.to_string exn));
-      Lwt_unix.close socket >>= fun () -> Lwt_result.fail (`Exn exn))
+      Lwt_unix.close socket >>= fun () -> Lwt_result.fail (Error.of_exn exn))
 ;;

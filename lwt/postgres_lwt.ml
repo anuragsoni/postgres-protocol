@@ -28,30 +28,11 @@
 
 open Postgres
 
-type error =
-  [ `Exn of exn
-  | `Msg of string
-  ]
-
-let wakeup_exn p w err =
-  let res =
-    match err with
-    | `Exn _ as e -> e
-    | `Msg _ as e -> e
-    | `Parse_error m -> `Msg m
-    | `Postgres_error e ->
-      let msg =
-        Format.asprintf "%a" Sexplib0.Sexp.pp_hum (Backend.Error_response.sexp_of_t e)
-      in
-      `Msg msg
-  in
-  if Lwt.is_sleeping p then Lwt.wakeup_later w (Error res) else ()
-;;
-
+let wakeup_exn p w err = if Lwt.is_sleeping p then Lwt.wakeup_later w (Error err) else ()
 let wakeup_if_empty p w r = if Lwt.is_sleeping p then Lwt.wakeup_later w (Ok r) else ()
 
 include Postgres.Connection.Make (struct
-  type 'a t = ('a, error) Lwt_result.t
+  type 'a t = ('a, Connection.Error.t) Lwt_result.t
 
   let return = Lwt_result.return
   let ( >>= ) = Lwt_result.( >>= )
@@ -63,7 +44,7 @@ include Postgres.Connection.Make (struct
   ;;
 
   module Sequencer = struct
-    type 'a future = ('a, error) Lwt_result.t
+    type 'a future = ('a, Connection.Error.t) Lwt_result.t
 
     type 'a t =
       { mutex : Lwt_mutex.t

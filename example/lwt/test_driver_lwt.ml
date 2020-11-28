@@ -101,8 +101,7 @@ let run_cmd cmd =
       res
       >>= function
       | Ok () -> Lwt.return ()
-      | Error (`Exn exn) -> Lwt.fail exn
-      | Error (`Msg msg) -> Lwt.fail_with msg
+      | Error err -> Postgres.Connection.Error.raise err
     in
     Lwt_main.run p
   | _ -> exit 1

@@ -10,14 +10,17 @@ module User_info : sig
   val make : user:string -> ?password:string -> ?database:string -> unit -> t
 end
 
-type error =
-  [ `Exn of exn
-  | `Msg of string
-  | `Postgres_error of Backend.Error_response.t
-  | `Parse_error of string
-  ]
+module Error : sig
+  type t
 
-type error_handler = error -> unit
+  val of_exn : exn -> t
+  val of_string : string -> t
+  val sexp_of_t : t -> Sexplib0.Sexp.t
+  val failf : ('a, Format.formatter, unit, ('b, t) result) format4 -> 'a
+  val raise : t -> _
+end
+
+type error_handler = Error.t -> unit
 type t
 type driver = (module Runtime_intf.S with type t = t) -> t -> unit
 
