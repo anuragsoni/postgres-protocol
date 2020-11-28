@@ -27,6 +27,7 @@
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
 open Lwt.Infix
+module Error = Postgres.Connection.Error
 
 let ( >>=? ) = Lwt_result.( >>= )
 let ( >>|? ) = Lwt_result.( >|= )
@@ -141,7 +142,7 @@ struct
           Log.err (fun m -> m "%a" FLOW.pp_write_error err);
           Lwt.wakeup_later
             wakeup_ssl_avail
-            (Fmt.error_msg
+            (Error.failf
                "Write error while sending request for ssl connection: %a"
                FLOW.pp_write_error
                err);
@@ -161,11 +162,11 @@ struct
           Log.err (fun m -> m "%a" FLOW.pp_error err);
           Lwt.wakeup_later
             wakeup_ssl_avail
-            (Fmt.error_msg "Error while reading from flow: %a" FLOW.pp_error err);
+            (Error.failf "Error while reading from flow: %a" FLOW.pp_error err);
           Lwt.return_unit)
       | `Stop -> Lwt.return_unit
       | `Fail msg ->
-        Lwt.wakeup_later wakeup_ssl_avail (Error (`Msg msg));
+        Lwt.wakeup_later wakeup_ssl_avail (Error (Error.of_string msg));
         Lwt.return_unit
     in
     Lwt.async (fun () -> loop ());
@@ -181,15 +182,18 @@ struct
       | Ok _ as res -> Lwt.return res
       | Error err ->
         Lwt.return
-          (Fmt.error_msg "Could not upgrade to tls flow: %a" TLS.pp_write_error err))
+          (Error.failf "Could not upgrade to tls flow: %a" TLS.pp_write_error err))
     | `Unavailable ->
-      Lwt.return (Error (`Msg "postgres server doesn't support connecting over ssl"))
+      Lwt.return
+        (Error (Error.of_string "postgres server doesn't support connecting over ssl"))
   ;;
 
   let resolve dns destination =
-    match destination with
-    | Domain (d, port) -> Dns.gethostbyname dns d >>|? fun i -> i, port
-    | Ipv4 (ip, p) -> Lwt_result.return (ip, p)
+    Lwt_result.map_err
+      (fun (`Msg m) -> Error.of_string m)
+      (match destination with
+      | Domain (d, port) -> Dns.gethostbyname dns d >>|? fun i -> i, port
+      | Ipv4 (ip, p) -> Lwt_result.return (ip, p))
   ;;
 
   let connect_inet stack dns destination =
@@ -199,7 +203,7 @@ struct
     >>= function
     | Ok _ as res -> Lwt.return res
     | Error err ->
-      Lwt.return (Fmt.error_msg "Failed to establish flow: %a" STACK.TCPV4.pp_error err)
+      Lwt.return (Error.failf "Failed to establish flow: %a" STACK.TCPV4.pp_error err)
   ;;
 
   let create stack =

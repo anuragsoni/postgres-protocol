@@ -8,4 +8,4 @@ val connect
   :  ?tls_config:Tls.Config.client
   -> Postgres.Connection.User_info.t
   -> destination
-  -> (Postgres_lwt.t, [> Postgres_lwt.error ]) Lwt_result.t
+  -> (Postgres_lwt.t, Postgres.Connection.Error.t) Lwt_result.t

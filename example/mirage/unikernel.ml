@@ -60,7 +60,7 @@ struct
     let database = Key_gen.pgdatabase () in
     let res =
       let open Lwt_result.Syntax in
-      let* conn = connect stack "asoni" "password" "localhost" 5432 in
+      let* conn = connect stack user password host port in
       let name = "my_unique_query" in
       let* () = prepare_query name conn in
       let* () = run name conn [ 9l; 2l; 3l ]
@@ -74,7 +74,6 @@ struct
     res
     >>= function
     | Ok () -> Lwt.return ()
-    | Error (`Exn exn) -> Lwt.fail exn
-    | Error (`Msg msg) -> Lwt.fail_with msg
+    | Error err -> Postgres.Connection.Error.raise err
   ;;
 end
