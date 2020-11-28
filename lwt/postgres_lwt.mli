@@ -33,26 +33,4 @@ type error =
   | `Msg of string
   ]
 
-type t
-
-val connect
-  :  (Connection.runtime -> Connection.t -> unit)
-  -> Connection.User_info.t
-  -> (t, [> error ]) Lwt_result.t
-
-val prepare
-  :  statement:string
-  -> ?name:string
-  -> ?oids:Types.Oid.t array
-  -> t
-  -> (unit, [> error ]) Lwt_result.t
-
-val execute
-  :  ?name:string
-  -> ?statement:string
-  -> ?parameters:(Types.Format_code.t * string option) array
-  -> (string option list -> unit)
-  -> t
-  -> (unit, [> error ]) Lwt_result.t
-
-val close : t -> (unit, [> error ]) Lwt_result.t
+include Connection.S with type 'a future := ('a, error) Lwt_result.t

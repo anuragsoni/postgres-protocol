@@ -33,8 +33,6 @@ type error =
   | `Msg of string
   ]
 
-let ( >>|? ) = Lwt_result.( >|= )
-
 let wakeup_exn p w err =
   let res =
     match err with
@@ -50,54 +48,29 @@ let wakeup_exn p w err =
   if Lwt.is_sleeping p then Lwt.wakeup_later w (Error res) else ()
 ;;
 
-let wakeup_if_empty p w r = if Lwt.is_sleeping p then Lwt.wakeup_later w r else ()
+let wakeup_if_empty p w r = if Lwt.is_sleeping p then Lwt.wakeup_later w (Ok r) else ()
 
-module Throttle = struct
-  type 'a t =
-    { mutex : Lwt_mutex.t
-    ; conn : 'a
-    }
+include Postgres.Connection.Make (struct
+  type 'a t = ('a, error) Lwt_result.t
 
-  let create conn = { conn; mutex = Lwt_mutex.create () }
-  let enqueue t f = Lwt_mutex.with_lock t.mutex (fun () -> f t.conn)
-end
+  let return = Lwt_result.return
+  let ( >>= ) = Lwt_result.( >>= )
 
-type t = Connection.t Throttle.t
+  let of_cps cps =
+    let promise, wakeup = Lwt.wait () in
+    cps (wakeup_exn promise wakeup) (wakeup_if_empty promise wakeup);
+    promise
+  ;;
 
-let connect driver user_info =
-  let finished, wakeup = Lwt.wait () in
-  Connection.connect driver user_info (wakeup_exn finished wakeup) (fun t ->
-      wakeup_if_empty finished wakeup (Ok t));
-  finished >>|? fun conn -> Throttle.create conn
-;;
+  module Sequencer = struct
+    type 'a future = ('a, error) Lwt_result.t
 
-let prepare ~statement ?(name = "") ?(oids = [||]) t =
-  Throttle.enqueue t
-  @@ fun conn ->
-  let finished, wakeup = Lwt.wait () in
-  Connection.prepare conn ~statement ~name ~oids (wakeup_exn finished wakeup) (fun () ->
-      wakeup_if_empty finished wakeup (Ok ()));
-  finished
-;;
+    type 'a t =
+      { mutex : Lwt_mutex.t
+      ; conn : 'a
+      }
 
-let execute ?(name = "") ?(statement = "") ?(parameters = [||]) on_data_row t =
-  Throttle.enqueue t
-  @@ fun conn ->
-  let finished, wakeup = Lwt.wait () in
-  Connection.execute
-    conn
-    ~name
-    ~statement
-    ~parameters
-    on_data_row
-    (wakeup_exn finished wakeup)
-    (fun () -> wakeup_if_empty finished wakeup (Ok ()));
-  finished
-;;
-
-let close t =
-  Throttle.enqueue t
-  @@ fun conn ->
-  Connection.close conn;
-  Lwt_result.return ()
-;;
+    let create conn = { conn; mutex = Lwt_mutex.create () }
+    let enqueue t f = Lwt_mutex.with_lock t.mutex (fun () -> f t.conn)
+  end
+end)

@@ -98,7 +98,7 @@ module Runtime = struct
   ;;
 end
 
-type runtime = (module Runtime_intf.S with type t = t)
+type driver = (module Runtime_intf.S with type t = t) -> t -> unit
 
 let handle_auth_message t msg =
   let r msg = raise @@ Auth_method_not_implemented msg in
@@ -260,3 +260,71 @@ let close conn =
   Serializer.terminate conn.writer;
   Runtime.shutdown conn
 ;;
+
+module type IO = sig
+  type 'a t
+
+  val return : 'a -> 'a t
+  val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
+  val of_cps : (error_handler -> ('a -> unit) -> unit) -> 'a t
+
+  module Sequencer : sig
+    type 'a future = 'a t
+    type 'a t
+
+    val create : 'a -> 'a t
+    val enqueue : 'a t -> ('a -> 'b future) -> 'b future
+  end
+end
+
+module type S = sig
+  type 'a future
+  type t
+
+  val connect : driver -> User_info.t -> t future
+
+  val prepare
+    :  statement:string
+    -> ?name:string
+    -> ?oids:Types.Oid.t array
+    -> t
+    -> unit future
+
+  val execute
+    :  ?name:string
+    -> ?statement:string
+    -> ?parameters:(Types.Format_code.t * string option) array
+    -> (string option list -> unit)
+    -> t
+    -> unit future
+
+  val close : t -> unit future
+end
+
+module Make (Io : IO) = struct
+  open Io
+
+  type t = Runtime.t Sequencer.t
+
+  let ( let* ) = ( >>= )
+
+  let connect driver user_info =
+    let* conn = of_cps (connect driver user_info) in
+    return (Sequencer.create conn)
+  ;;
+
+  let prepare ~statement ?name ?oids t =
+    Sequencer.enqueue t @@ fun conn -> of_cps (prepare conn ~statement ?name ?oids)
+  ;;
+
+  let execute ?name ?statement ?parameters on_data_row t =
+    Sequencer.enqueue t
+    @@ fun conn -> of_cps (execute conn ?name ?statement ?parameters on_data_row)
+  ;;
+
+  let close t =
+    Sequencer.enqueue t (fun conn ->
+        close conn;
+        return ())
+  ;;
+end
