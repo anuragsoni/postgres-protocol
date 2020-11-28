@@ -12,8 +12,8 @@ struct
     List.to_seq ids
     |> Seq.map (fun id ->
            let b = Bytes.create 4 in
-           Bytes.set_int32_be b 0 id;
-           Postgres.Frontend.Bind.make_param ~parameter:(Bytes.to_string b) `Binary ())
+           Caml.Bytes.set_int32_be b 0 id;
+           `Binary, Some (Bytes.to_string b))
     |> Array.of_seq
   ;;
 
