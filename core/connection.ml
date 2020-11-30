@@ -247,7 +247,7 @@ let handle_message' t msg =
     | Execute -> handle_execute t msg)
 ;;
 
-let connect driver user_info on_error finish =
+let startup driver user_info on_error finish =
   let rec handle_message msg =
     let t = Lazy.force t in
     handle_message' t msg
@@ -341,7 +341,7 @@ module type S = sig
   type 'a future
   type t
 
-  val connect : driver -> User_info.t -> t future
+  val startup : driver -> User_info.t -> t future
 
   val prepare
     :  statement:string
@@ -368,8 +368,8 @@ module Make (Io : IO) = struct
 
   let ( let* ) = ( >>= )
 
-  let connect driver user_info =
-    let* conn = of_cps (connect driver user_info) in
+  let startup driver user_info =
+    let* conn = of_cps (startup driver user_info) in
     return (Sequencer.create conn)
   ;;
 

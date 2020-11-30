@@ -44,7 +44,7 @@ module type S = sig
   type 'a future
   type t
 
-  val connect : driver -> User_info.t -> t future
+  val startup : driver -> User_info.t -> t future
 
   val prepare
     :  statement:string

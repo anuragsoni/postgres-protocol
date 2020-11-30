@@ -86,7 +86,7 @@ let connect ?tls_config user_info destination =
             (Error.of_string
                "Requested a ssl connection, but the postgres server doesn't support \
                 connecting over ssl.")))
-      >>=? fun socket -> Postgres_lwt.connect (Io.run socket) user_info)
+      >>=? fun socket -> Postgres_lwt.startup (Io.run socket) user_info)
     (fun exn ->
       Log.err (fun m ->
           m "Could not create postgres connection. %s" (Printexc.to_string exn));

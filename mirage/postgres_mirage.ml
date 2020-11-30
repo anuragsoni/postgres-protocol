@@ -214,12 +214,12 @@ struct
       match tls_config with
       | None ->
         let module Io = Make_io (STACK.TCPV4) in
-        Postgres_lwt.connect (fun conn -> Io.run flow conn) user_info
+        Postgres_lwt.startup (fun conn -> Io.run flow conn) user_info
       | Some conf ->
         upgrade_flow conf flow
         >>=? fun flow' ->
         Log.info (fun m -> m "connecting over tls");
         let module Io = Make_io (TLS) in
-        Postgres_lwt.connect (fun conn -> Io.run flow' conn) user_info
+        Postgres_lwt.startup (fun conn -> Io.run flow' conn) user_info
   ;;
 end
