@@ -28,7 +28,8 @@
 
 open Import
 open Types
-module Frontend = Frontend0
+module Serializer = Frontend.Private.Serializer
+module Parser = Backend.Private.Parser
 
 exception Auth_method_not_implemented of string
 
@@ -115,6 +116,7 @@ type mode =
   | Connect
   | Parse
   | Execute
+  | Close_statement_portal
 
 type t =
   { user_info : User_info.t
@@ -237,6 +239,12 @@ let handle_execute t msg =
   | _ -> ()
 ;;
 
+let handle_close t msg =
+  match msg with
+  | Backend.CloseComplete -> t.ready_for_query ()
+  | _ -> ()
+;;
+
 let handle_message' t msg =
   match msg with
   | Backend.ErrorResponse e -> t.on_error (Error.of_pg_err e)
@@ -244,7 +252,8 @@ let handle_message' t msg =
     (match t.state with
     | Connect -> handle_connect t msg
     | Parse -> handle_parse t msg
-    | Execute -> handle_execute t msg)
+    | Execute -> handle_execute t msg
+    | Close_statement_portal -> handle_close t msg)
 ;;
 
 let startup driver user_info on_error finish =
@@ -292,8 +301,8 @@ let prepare conn ~statement ?(name = "") ?(oids = [||]) on_error finish =
 
 let execute
     conn
-    ?(name = "")
-    ?(statement = "")
+    ?(portal_name = "")
+    ?(statement_name = "")
     ?(parameters = [||])
     on_data_row
     on_error
@@ -308,15 +317,26 @@ let execute
       (fun (format_code, parameter) -> Frontend.Bind.make_param format_code ?parameter ())
       parameters
   in
-  let b = Frontend.Bind.make ~destination:name ~statement ~parameters () in
-  let e = Frontend.Execute.make ~name `Unlimited () in
+  let b =
+    Frontend.Bind.make ~destination:portal_name ~statement:statement_name ~parameters ()
+  in
+  let e = Frontend.Execute.make ~name:portal_name `Unlimited () in
   Serializer.bind conn.writer b;
   Serializer.execute conn.writer e;
   Serializer.sync conn.writer;
   Serializer.wakeup_writer conn.writer
 ;;
 
-let close conn =
+let close msg conn on_error finish =
+  conn.ready_for_query <- finish;
+  conn.on_error <- on_error;
+  conn.state <- Close_statement_portal;
+  Serializer.close conn.writer msg;
+  Serializer.flush conn.writer;
+  Serializer.wakeup_writer conn.writer
+;;
+
+let terminate conn =
   Serializer.terminate conn.writer;
   Runtime.shutdown conn
 ;;
@@ -344,21 +364,22 @@ module type S = sig
   val startup : driver -> User_info.t -> t future
 
   val prepare
-    :  statement:string
-    -> ?name:string
+    :  ?name:string
     -> ?oids:Types.Oid.t array
+    -> statement:string
     -> t
     -> unit future
 
   val execute
-    :  ?name:string
-    -> ?statement:string
+    :  ?portal_name:string
+    -> ?statement_name:string
     -> ?parameters:(Types.Format_code.t * string option) array
     -> (string option list -> unit)
     -> t
     -> unit future
 
-  val close : t -> unit future
+  val close : Frontend.Close.t -> t -> unit future
+  val terminate : t -> unit future
 end
 
 module Make (Io : IO) = struct
@@ -373,18 +394,21 @@ module Make (Io : IO) = struct
     return (Sequencer.create conn)
   ;;
 
-  let prepare ~statement ?name ?oids t =
+  let prepare ?name ?oids ~statement t =
     Sequencer.enqueue t @@ fun conn -> of_cps (prepare conn ~statement ?name ?oids)
   ;;
 
-  let execute ?name ?statement ?parameters on_data_row t =
+  let execute ?portal_name ?statement_name ?parameters on_data_row t =
     Sequencer.enqueue t
-    @@ fun conn -> of_cps (execute conn ?name ?statement ?parameters on_data_row)
+    @@ fun conn ->
+    of_cps (execute conn ?portal_name ?statement_name ?parameters on_data_row)
   ;;
 
-  let close t =
+  let close msg t = Sequencer.enqueue t @@ fun conn -> of_cps (close msg conn)
+
+  let terminate t =
     Sequencer.enqueue t (fun conn ->
-        close conn;
+        terminate conn;
         return ())
   ;;
 end

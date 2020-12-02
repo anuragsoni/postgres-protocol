@@ -14,12 +14,12 @@ let prepare_query name conn =
     conn
 ;;
 
-let run name conn ids =
+let run statement_name conn ids =
   let parameters = make_parameters ids in
   (* If we use named prepared queries, we can reference them by name later on in the
      session lifecycle. *)
   Postgres_lwt.execute
-    ~statement:name
+    ~statement_name
     ~parameters
     (fun data_row ->
       match data_row with
@@ -36,7 +36,7 @@ let execute conn =
   and* () = run name conn [ 2l; 4l; 10l ]
   and* () = run name conn [ 1l; 7l; 2l ]
   and* () = run name conn [ 78l; 11l; 6l ] in
-  let+ () = Postgres_lwt.close conn in
+  let+ () = Postgres_lwt.terminate conn in
   Logs.info (fun m -> m "Finished")
 ;;
 
