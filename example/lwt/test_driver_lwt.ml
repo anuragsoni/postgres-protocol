@@ -14,12 +14,12 @@ let prepare_query name conn =
     conn
 ;;
 
-let run name conn ids =
+let run statement_name conn ids =
   let parameters = make_parameters ids in
   (* If we use named prepared queries, we can reference them by name later on in the
      session lifecycle. *)
   Postgres_lwt.execute
-    ~statement:name
+    ~statement_name
     ~parameters
     (fun data_row ->
       match data_row with

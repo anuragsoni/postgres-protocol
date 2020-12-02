@@ -47,15 +47,15 @@ module type S = sig
   val startup : driver -> User_info.t -> t future
 
   val prepare
-    :  statement:string
-    -> ?name:string
+    :  ?name:string
     -> ?oids:Types.Oid.t array
+    -> statement:string
     -> t
     -> unit future
 
   val execute
-    :  ?name:string
-    -> ?statement:string
+    :  ?portal_name:string
+    -> ?statement_name:string
     -> ?parameters:(Types.Format_code.t * string option) array
     -> (string option list -> unit)
     -> t
