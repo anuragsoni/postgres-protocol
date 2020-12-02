@@ -61,7 +61,8 @@ module type S = sig
     -> t
     -> unit future
 
-  val close : t -> unit future
+  val close : Frontend.Close.t -> t -> unit future
+  val terminate : t -> unit future
 end
 
 module Make (Io : IO) : S with type 'a future := 'a Io.t

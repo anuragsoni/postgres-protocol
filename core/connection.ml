@@ -28,7 +28,8 @@
 
 open Import
 open Types
-module Frontend = Frontend0
+module Serializer = Frontend.Private.Serializer
+module Parser = Backend.Private.Parser
 
 exception Auth_method_not_implemented of string
 
@@ -115,6 +116,7 @@ type mode =
   | Connect
   | Parse
   | Execute
+  | Close_statement_portal
 
 type t =
   { user_info : User_info.t
@@ -237,6 +239,12 @@ let handle_execute t msg =
   | _ -> ()
 ;;
 
+let handle_close t msg =
+  match msg with
+  | Backend.CloseComplete -> t.ready_for_query ()
+  | _ -> ()
+;;
+
 let handle_message' t msg =
   match msg with
   | Backend.ErrorResponse e -> t.on_error (Error.of_pg_err e)
@@ -244,7 +252,8 @@ let handle_message' t msg =
     (match t.state with
     | Connect -> handle_connect t msg
     | Parse -> handle_parse t msg
-    | Execute -> handle_execute t msg)
+    | Execute -> handle_execute t msg
+    | Close_statement_portal -> handle_close t msg)
 ;;
 
 let startup driver user_info on_error finish =
@@ -316,7 +325,16 @@ let execute
   Serializer.wakeup_writer conn.writer
 ;;
 
-let close conn =
+let close msg conn on_error finish =
+  conn.ready_for_query <- finish;
+  conn.on_error <- on_error;
+  conn.state <- Close_statement_portal;
+  Serializer.close conn.writer msg;
+  Serializer.flush conn.writer;
+  Serializer.wakeup_writer conn.writer
+;;
+
+let terminate conn =
   Serializer.terminate conn.writer;
   Runtime.shutdown conn
 ;;
@@ -358,7 +376,8 @@ module type S = sig
     -> t
     -> unit future
 
-  val close : t -> unit future
+  val close : Frontend.Close.t -> t -> unit future
+  val terminate : t -> unit future
 end
 
 module Make (Io : IO) = struct
@@ -382,9 +401,11 @@ module Make (Io : IO) = struct
     @@ fun conn -> of_cps (execute conn ?name ?statement ?parameters on_data_row)
   ;;
 
-  let close t =
+  let close msg t = Sequencer.enqueue t @@ fun conn -> of_cps (close msg conn)
+
+  let terminate t =
     Sequencer.enqueue t (fun conn ->
-        close conn;
+        terminate conn;
         return ())
   ;;
 end

@@ -36,7 +36,7 @@ let execute conn =
   and* () = run name conn [ 2l; 4l; 10l ]
   and* () = run name conn [ 1l; 7l; 2l ]
   and* () = run name conn [ 78l; 11l; 6l ] in
-  let+ () = Postgres_lwt.close conn in
+  let+ () = Postgres_lwt.terminate conn in
   Logs.info (fun m -> m "Finished")
 ;;
 

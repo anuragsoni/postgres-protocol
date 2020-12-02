@@ -87,3 +87,36 @@ module Execute : sig
     -> unit
     -> t
 end
+
+module Close : sig
+  type t
+
+  val portal : string -> t
+  val statement : string -> t
+end
+
+module Private : sig
+  module Serializer : sig
+    type t
+
+    val close_and_drain : t -> unit
+    val create : ?size:int -> unit -> t
+    val yield_writer : t -> (unit -> unit) -> unit
+    val wakeup_writer : t -> unit
+    val is_closed : t -> bool
+    val report_write_result : t -> [ `Ok of int | `Closed ] -> unit
+    val startup : t -> Startup_message.t -> unit
+    val password : t -> Password_message.t -> unit
+    val parse : t -> Parse.t -> unit
+    val bind : t -> Bind.t -> unit
+    val execute : t -> Execute.t -> unit
+    val sync : t -> unit
+    val terminate : t -> unit
+    val close : t -> Close.t -> unit
+    val flush : t -> unit
+
+    val next_operation
+      :  t
+      -> [ `Write of Faraday.bigstring Faraday.iovec list | `Yield | `Close of int ]
+  end
+end

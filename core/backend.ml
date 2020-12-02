@@ -240,6 +240,7 @@ type message =
   | ReadyForQuery of Ready_for_query.t
   | ParseComplete
   | BindComplete
+  | CloseComplete
   | DataRow of string option list
   | UnknownMessage of char
 
@@ -257,8 +258,61 @@ let parse =
   | 'Z' -> lift (fun m -> ReadyForQuery m) @@ Ready_for_query.parse header
   | '1' -> return ParseComplete
   | '2' -> return BindComplete
+  | '3' -> return CloseComplete
   | 'D' -> lift (fun m -> DataRow m) @@ Data_row.parse header
   | c ->
     Logger.warn (fun m -> m "Received an unknown message with ident: %C" c);
     take (length - 4) *> (return @@ UnknownMessage c)
 ;;
+
+module Private = struct
+  module Parser = struct
+    module U = Angstrom.Unbuffered
+
+    type t =
+      { mutable parse_state : unit U.state
+      ; parser : unit Angstrom.t
+      ; mutable closed : bool
+      }
+
+    let create parser handler =
+      let parser = Angstrom.(skip_many (parser <* commit >>| handler)) in
+      { parser; parse_state = U.Done (0, ()); closed = false }
+    ;;
+
+    let next_action t =
+      match t.parse_state with
+      | _ when t.closed -> `Close
+      | U.Done _ -> `Read
+      | Partial _ -> `Read
+      | Fail (_, _, _msg) -> `Close
+    ;;
+
+    let parse t ~buf ~off ~len more =
+      let rec aux t =
+        match t.parse_state with
+        | U.Partial { continue; _ } -> t.parse_state <- continue buf ~off ~len more
+        | U.Done (0, ()) ->
+          t.parse_state <- U.parse t.parser;
+          aux t
+        | U.Done _ -> t.parse_state <- U.Done (0, ())
+        | U.Fail _ -> ()
+      in
+      aux t;
+      match t.parse_state with
+      | U.Partial { committed; _ } | U.Done (committed, ()) | U.Fail (committed, _, _) ->
+        committed
+    ;;
+
+    let feed t ~buf ~off ~len more =
+      let committed = parse t ~buf ~off ~len more in
+      (match more with
+      | U.Complete -> t.closed <- true
+      | Incomplete -> ());
+      committed
+    ;;
+
+    let is_closed t = t.closed
+    let force_close t = t.closed <- true
+  end
+end

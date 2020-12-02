@@ -114,7 +114,36 @@ type message =
   | ReadyForQuery of Ready_for_query.t
   | ParseComplete
   | BindComplete
+  | CloseComplete
   | DataRow of string option list
   | UnknownMessage of char
 
 val parse : message Angstrom.t
+
+module Private : sig
+  module Parser : sig
+    type t
+
+    val create : 'a Angstrom.t -> ('a -> 'b) -> t
+    val next_action : t -> [ `Read | `Close ]
+
+    val parse
+      :  t
+      -> buf:Bigstringaf.t
+      -> off:int
+      -> len:int
+      -> Angstrom.Unbuffered.more
+      -> int
+
+    val feed
+      :  t
+      -> buf:Bigstringaf.t
+      -> off:int
+      -> len:int
+      -> Angstrom.Unbuffered.more
+      -> int
+
+    val is_closed : t -> bool
+    val force_close : t -> unit
+  end
+end
