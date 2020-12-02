@@ -31,6 +31,7 @@ open Import
 let log_src = Logger.src
 
 module Types = Types
+module Error = Error
 module Frontend = Frontend
 module Backend = Backend
 module Request_ssl = Request_ssl

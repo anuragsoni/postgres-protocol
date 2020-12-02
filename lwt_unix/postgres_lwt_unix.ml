@@ -4,7 +4,7 @@ let ( >>| ) = Lwt.( >|= )
 let src = Logs.Src.create "postgres.lwt.unix"
 
 module Log = (val Logs.src_log src : Logs.LOG)
-module Error = Postgres.Connection.Error
+module Error = Postgres.Error
 
 type destination =
   | Unix_domain of string

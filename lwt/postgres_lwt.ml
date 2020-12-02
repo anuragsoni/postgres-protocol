@@ -32,7 +32,7 @@ let wakeup_exn p w err = if Lwt.is_sleeping p then Lwt.wakeup_later w (Error err
 let wakeup_if_empty p w r = if Lwt.is_sleeping p then Lwt.wakeup_later w (Ok r) else ()
 
 include Postgres.Connection.Make (struct
-  type 'a t = ('a, Connection.Error.t) Lwt_result.t
+  type 'a t = ('a, Error.t) Lwt_result.t
 
   let return = Lwt_result.return
   let ( >>= ) = Lwt_result.( >>= )
@@ -44,7 +44,7 @@ include Postgres.Connection.Make (struct
   ;;
 
   module Sequencer = struct
-    type 'a future = ('a, Connection.Error.t) Lwt_result.t
+    type 'a future = ('a, Error.t) Lwt_result.t
 
     type 'a t =
       { mutex : Lwt_mutex.t

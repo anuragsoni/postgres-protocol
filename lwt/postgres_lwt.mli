@@ -27,4 +27,4 @@
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
 open Postgres
-include Connection.S with type 'a future := ('a, Connection.Error.t) Lwt_result.t
+include Connection.S with type 'a future := ('a, Error.t) Lwt_result.t

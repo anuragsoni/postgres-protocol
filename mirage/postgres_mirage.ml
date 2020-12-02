@@ -27,7 +27,7 @@
    THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. *)
 
 open Lwt.Infix
-module Error = Postgres.Connection.Error
+module Error = Postgres.Error
 
 let ( >>=? ) = Lwt_result.( >>= )
 let ( >>|? ) = Lwt_result.( >|= )
