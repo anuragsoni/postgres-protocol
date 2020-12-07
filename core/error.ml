@@ -23,41 +23,32 @@
    THE USE OR OTHER DEALINGS IN THE SOFTWARE. *)
 open Sexplib0.Sexp_conv
 
-module Kind = struct
-  type t =
-    | Exn of exn
-    | Msg of string
-    | Sexp of Sexplib0.Sexp.t
-  [@@deriving sexp_of]
-end
+type t =
+  [ `Exn of exn
+  | `Msg of string
+  | `Sexp of Sexplib0.Sexp.t
+  ]
+[@@deriving sexp_of]
 
-type t = Kind.t Lazy.t
-
-exception Exn of Kind.t
+exception Exn of t
 
 (* Register a pretty printer for exceptions raised via Error module. Without this the user
    would see [Fatal error: exception Error.Exn(_)]. With the printer we will instead see a
    sexp formatted message. *)
 let () =
   Printexc.register_printer (function
-      | Exn t -> Some (Sexplib0.Sexp.to_string_hum (Kind.sexp_of_t t))
+      | Exn t -> Some (Sexplib0.Sexp.to_string_hum (sexp_of_t t))
       | _ -> None)
 ;;
 
-let of_exn exn = Lazy.from_val (Kind.Exn exn)
-let of_string msg = Lazy.from_val (Kind.Msg msg)
-let of_sexp s = Lazy.from_val (Kind.Sexp s)
+let of_exn exn = `Exn exn
+let of_string msg = `Msg msg
+let of_sexp s = `Sexp s
 let failf fmt = Format.kasprintf (fun v -> Error (of_string v)) fmt
 
-let sexp_of_t t =
-  let kind = Lazy.force t in
-  Kind.sexp_of_t kind
-;;
-
 let to_exn t =
-  let kind = Lazy.force t in
-  match kind with
-  | Kind.Exn exn -> raise exn
+  match t with
+  | `Exn exn -> raise exn
   | t -> raise (Exn t)
 ;;
 
