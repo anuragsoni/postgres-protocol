@@ -14,6 +14,43 @@ let prepare_query name conn =
     conn
 ;;
 
+let setup conn =
+  let open Lwt_result.Infix in
+  let drop_users = "DROP TABLE IF EXISTS users;" in
+  let create_users =
+    {|
+    CREATE TABLE IF NOT EXISTS users(
+      id SERIAL PRIMARY KEY,
+      email VARCHAR(40) NOT NULL UNIQUE
+    );
+  |}
+  in
+  let create_random_users =
+    {|
+    INSERT INTO users(email)
+    SELECT
+    'user_' || seq || '@' || (
+      CASE (RANDOM() * 2)::INT
+        WHEN 0 THEN 'gmail'
+        WHEN 1 THEN 'hotmail'
+        WHEN 2 THEN 'yahoo'
+      END
+    ) || '.com' AS email
+    FROM GENERATE_SERIES(1, 10) seq;
+  |}
+  in
+  Postgres_lwt.prepare ~statement:drop_users conn
+  >>= fun () ->
+  Postgres_lwt.execute (fun _ -> ()) conn
+  >>= fun () ->
+  Postgres_lwt.prepare ~statement:create_users conn
+  >>= fun () ->
+  Postgres_lwt.execute (fun _ -> ()) conn
+  >>= fun () ->
+  Postgres_lwt.prepare ~statement:create_random_users conn
+  >>= fun () -> Postgres_lwt.execute (fun _ -> ()) conn
+;;
+
 let run statement_name conn ids =
   let parameters = make_parameters ids in
   (* If we use named prepared queries, we can reference them by name later on in the
@@ -30,6 +67,7 @@ let run statement_name conn ids =
 
 let execute conn =
   let open Lwt_result.Syntax in
+  let* () = setup conn in
   let name = "my_unique_query" in
   let* () = prepare_query name conn in
   let* () = run name conn [ 9l; 2l; 3l ]
