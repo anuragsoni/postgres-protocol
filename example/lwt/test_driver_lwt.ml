@@ -1,3 +1,5 @@
+open Lwt.Syntax
+
 let make_parameters ids =
   List.to_seq ids
   |> Seq.map (fun id ->
@@ -79,8 +81,7 @@ let execute conn =
 ;;
 
 let run host port user password database ssl =
-  let open Lwt.Infix in
-  let%bind user =
+  let* user =
     match user with
     | None -> Lwt_unix.getlogin ()
     | Some u -> Lwt.return u
