@@ -60,7 +60,7 @@
  (tags
   (postgres postgresql mirage))
  (depends
-  dns-client
+  (dns-client (< 5.0.0))
   ipaddr
   domain-name
   (ocaml

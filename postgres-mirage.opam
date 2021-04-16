@@ -9,7 +9,7 @@ doc: "https://anuragsoni.github.io/postgres-protocol"
 bug-reports: "https://github.com/anuragsoni/postgres-protocol/issues"
 depends: [
   "dune" {>= "2.7"}
-  "dns-client"
+  "dns-client" {< "5.0.0"}
   "ipaddr"
   "domain-name"
   "ocaml" {>= "4.08"}
