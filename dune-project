@@ -1,4 +1,4 @@
-(lang dune 2.7)
+(lang dune 3.7)
 
 (name postgres)
 
@@ -11,9 +11,7 @@
 
 (maintainers "Anurag Soni <anurag@sonianurag.com>")
 
-(documentation https://anuragsoni.github.io/postgres-protocol)
-
-(license BSD-3-clause)
+(license MPL-2.0)
 
 (package
  (name postgres)
@@ -21,56 +19,24 @@
   (postgres postgresql))
  (depends
   (ocaml
-   (>= 4.08))
-  (angstrom
-   (>= 0.14.1))
-  (faraday
-   (>= 0.7.2))
-  logs
-  sexplib0
-  (ppx_sexp_conv (>= "v0.14.1"))
-  (alcotest :with-test)))
+   (>= 4.14))
+  (core
+   (>= v0.15.0))
+  (core_kernel
+   (>= v0.15.0))
+  (ppx_jane
+   (>= v0.15.0))
+  mirage-crypto-rng
+  base64
+  pbkdf))
 
 (package
- (name postgres-lwt)
+ (name postgres_eio)
  (tags
-  (postgres postgresql))
+  (postgres postgresql eio))
  (depends
   (ocaml
-   (>= 4.08))
+   (>= 5.0.0))
+  eio
   (postgres
-   (= :version))
-  lwt))
-
-(package
- (name postgres-lwt-unix)
- (tags
-  (postgres postgresql))
- (depends
-  (ocaml
-   (>= 4.08))
-  (postgres-lwt
-   (= :version))
-  lwt
-  faraday-lwt-unix
-  tls))
-
-(package
- (name postgres-mirage)
- (tags
-  (postgres postgresql mirage))
- (depends
-  (dns-client (< 5.0.0))
-  ipaddr
-  domain-name
-  (ocaml
-   (>= 4.08))
-  (postgres-lwt
-   (= :version))
-  mirage-stack
-  mirage-random
-  mirage-time
-  mirage-clock
-  tls-mirage
-  lwt))
-
+   (= :version))))

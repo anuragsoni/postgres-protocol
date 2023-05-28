@@ -1,6 +1,0 @@
-(library
- (name postgres)
- (public_name postgres)
- (preprocess
-  (pps ppx_sexp_conv))
- (libraries angstrom faraday logs sexplib0))

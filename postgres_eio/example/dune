@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (preprocess
+  (pps ppx_jane))
+ (libraries eio_main postgres_eio mirage-crypto-rng-eio))

@@ -1,0 +1,6 @@
+(library
+ (name test_postgres)
+ (inline_tests)
+ (preprocess
+  (pps ppx_jane))
+ (libraries postgres))

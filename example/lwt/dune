@@ -1,5 +1,0 @@
-(executable
- (modules test_driver_lwt)
- (name test_driver_lwt)
- (libraries postgres logs.fmt fmt.tty postgres-lwt postgres-lwt-unix
-   mirage-crypto-rng.unix cmdliner))

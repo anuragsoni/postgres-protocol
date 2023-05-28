@@ -1,0 +1,5 @@
+(library
+ (public_name postgres)
+ (preprocess
+  (pps ppx_jane))
+ (libraries core core_kernel.iobuf mirage-crypto-rng base64 pbkdf))
