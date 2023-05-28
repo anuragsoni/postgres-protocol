@@ -1,0 +1,6 @@
+(library
+ (name postgres_eio)
+ (public_name postgres_eio)
+ (preprocess
+  (pps ppx_jane))
+ (libraries postgres eio))

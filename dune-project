@@ -24,11 +24,19 @@
    (>= v0.15.0))
   (core_kernel
    (>= v0.15.0))
-  (ppx_sexp_conv
-   (>= v0.15.0))
-  (ppx_let
+  (ppx_jane
    (>= v0.15.0))
   mirage-crypto-rng
   base64
-  pbkdf
-  (ppx_jane :with-test)))
+  pbkdf))
+
+(package
+ (name postgres_eio)
+ (tags
+  (postgres postgresql eio))
+ (depends
+  (ocaml
+   (>= 5.0.0))
+  eio
+  (postgres
+   (= :version))))
