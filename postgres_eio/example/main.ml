@@ -1,4 +1,4 @@
-open Base
+open Core
 open Eio.Std
 
 let drop_users = "DROP TABLE IF EXISTS users;"
