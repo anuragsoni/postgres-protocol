@@ -11,7 +11,7 @@ val prepare : ?name:string -> ?oids:int array -> t -> string -> unit Or_error.t
 val execute
   :  ?destination:string
   -> ?statement:string
-  -> ?parameters:Postgres.Frontend.Param.t array
+  -> ?parameters:Postgres.Param.t array
   -> ?result_formats:Postgres.Format_code.t array
   -> on_data_row:(Postgres.Backend.Data_row.t -> unit)
   -> t

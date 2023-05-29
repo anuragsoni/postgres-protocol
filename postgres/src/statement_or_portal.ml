@@ -22,4 +22,3 @@ let write t buf =
   assert (Iobuf.length buf >= 1);
   Iobuf.Fill.char buf (to_char t)
 ;;
-

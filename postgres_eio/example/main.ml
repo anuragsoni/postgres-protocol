@@ -46,9 +46,7 @@ let make_parameters ids =
   |> Sequence.map ~f:(fun id ->
        let b = Bytes.create 4 in
        Caml.Bytes.set_int32_be b 0 id;
-       Postgres.Frontend.Param.create
-         ~parameter:(Bytes.to_string b)
-         Postgres.Format_code.binary)
+       Postgres.Param.create ~parameter:(Bytes.to_string b) Postgres.Format_code.binary)
   |> Sequence.to_array
 ;;
 
