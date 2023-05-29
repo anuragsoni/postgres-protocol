@@ -58,9 +58,9 @@ let main ~env ~user ~password ~database =
 
 ## TODO
 
-* add functions that'll clean up by closing connections after finishing a task
-* support binary format for parameters
 * add wrapper to handle parameters in an easier manner
+* Support transactions
+* Support postgres notify/listen channels
 * documentation
 * support TLS encrypted connections
 * TEST!!
